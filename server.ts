@@ -145,7 +145,23 @@ async function startServer() {
     }
   });
 
-  // 5. DELETE cancel/delete booking
+  // 5. PUT edit full booking
+  app.put('/api/bookings/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const updatedData = req.body;
+      const updated = Storage.updateBooking(id, updatedData);
+      if (!updated) {
+        return res.status(404).json({ success: false, error: `Booking ${id} not found.` });
+      }
+      res.json({ success: true, data: updated });
+    } catch (err: any) {
+      console.error(`Error updating booking ${req.params.id}:`, err);
+      res.status(500).json({ success: false, error: 'Failed to update booking.' });
+    }
+  });
+
+  // 6. DELETE cancel/delete booking
   app.delete('/api/bookings/:id', (req, res) => {
     try {
       const { id } = req.params;
@@ -195,6 +211,20 @@ async function startServer() {
     }
   });
 
+  app.put('/api/inquiries/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const updatedInq = req.body;
+      const updated = Storage.updateInquiry(id, updatedInq);
+      if (!updated) {
+        return res.status(404).json({ success: false, error: 'Inquiry not found.' });
+      }
+      res.json({ success: true, data: updated });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: 'Failed to update inquiry.' });
+    }
+  });
+
   app.patch('/api/inquiries/:id/status', (req, res) => {
     try {
       const { id } = req.params;
@@ -206,6 +236,19 @@ async function startServer() {
       res.json({ success: true, data: updated });
     } catch (err: any) {
       res.status(500).json({ success: false, error: 'Failed to update inquiry.' });
+    }
+  });
+
+  app.delete('/api/inquiries/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = Storage.deleteInquiry(id);
+      if (!deleted) {
+        return res.status(404).json({ success: false, error: 'Inquiry not found.' });
+      }
+      res.json({ success: true, message: `Inquiry ${id} deleted.` });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: 'Failed to delete inquiry.' });
     }
   });
 

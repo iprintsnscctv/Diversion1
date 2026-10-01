@@ -79,6 +79,11 @@ interface AdminDeskTabProps {
   bookings: BookingRecord[];
   onUpdateBookingStatus: (bookingId: string, status: BookingStatus, notes?: string) => void;
   onRebookBooking?: (bookingId: string, updatedFields: Partial<BookingRecord>, note: string) => void;
+  onEditBooking?: (updatedBooking: BookingRecord) => void;
+  onDeleteBooking?: (bookingId: string) => void;
+  inquiries?: InquiryRecord[];
+  onEditInquiry?: (updatedInquiry: InquiryRecord) => void;
+  onDeleteInquiry?: (inquiryId: string) => void;
   onOpenVoucher: (booking: BookingRecord) => void;
   onOpenSlipLightbox: (booking: BookingRecord) => void;
   onAddWalkinBooking: (booking: BookingRecord) => void;
@@ -130,6 +135,11 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
   bookings,
   onUpdateBookingStatus,
   onRebookBooking,
+  onEditBooking,
+  onDeleteBooking,
+  inquiries: propInquiries,
+  onEditInquiry,
+  onDeleteInquiry,
   onOpenVoucher,
   onOpenSlipLightbox,
   onAddWalkinBooking,
@@ -743,13 +753,35 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
     }
   });
 
-  const [guestOverrides, setGuestOverrides] = useState<Record<string, { notes?: string; isVip?: boolean }>>(() => {
+  const [guestOverrides, setGuestOverrides] = useState<Record<string, { fullName?: string; phone?: string; email?: string; address?: string; idType?: string; idNumber?: string; notes?: string; isVip?: boolean }>>(() => {
     try {
       return JSON.parse(localStorage.getItem("diversion_vigan_guest_overrides") || "{}");
     } catch {
       return {};
     }
   });
+
+  const [deletedGuestIds, setDeletedGuestIds] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("diversion_deleted_guest_ids") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("diversion_deleted_guest_ids", JSON.stringify(deletedGuestIds));
+  }, [deletedGuestIds]);
+
+  // Section Modal States
+  const [editingGuestProfile, setEditingGuestProfile] = useState<GuestProfile | null>(null);
+  const [deletingGuestProfile, setDeletingGuestProfile] = useState<GuestProfile | null>(null);
+
+  const [editingBooking, setEditingBooking] = useState<BookingRecord | null>(null);
+  const [deletingBooking, setDeletingBooking] = useState<BookingRecord | null>(null);
+
+  const [editingInquiry, setEditingInquiry] = useState<InquiryRecord | null>(null);
+  const [deletingInquiry, setDeletingInquiry] = useState<InquiryRecord | null>(null);
 
   const [guestSearchQuery, setGuestSearchQuery] = useState("");
   const [guestFilterStatus, setGuestFilterStatus] = useState<"all" | "vip" | "repeat" | "active" | "inquiry">("all");
@@ -885,19 +917,33 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
     });
 
     // 4. Apply Overrides and Auto-VIP logic
-    return Array.from(map.values()).map((g) => {
-      const override = guestOverrides[g.id];
-      const autoVip = g.totalStays >= 2 || g.totalSpend >= 5000;
-      const isVip = override?.isVip !== undefined ? override.isVip : (g.isVip || autoVip);
-      const notes = override?.notes !== undefined ? override.notes : g.notes;
+    return Array.from(map.values())
+      .filter((g) => !deletedGuestIds.includes(g.id))
+      .map((g) => {
+        const override = guestOverrides[g.id];
+        const autoVip = g.totalStays >= 2 || g.totalSpend >= 5000;
+        const isVip = override?.isVip !== undefined ? override.isVip : (g.isVip || autoVip);
+        const notes = override?.notes !== undefined ? override.notes : g.notes;
+        const fullName = override?.fullName || g.fullName;
+        const phone = override?.phone || g.phone;
+        const email = override?.email || g.email;
+        const address = override?.address !== undefined ? override.address : g.address;
+        const idType = override?.idType !== undefined ? override.idType : g.idType;
+        const idNumber = override?.idNumber !== undefined ? override.idNumber : g.idNumber;
 
-      return {
-        ...g,
-        isVip,
-        notes,
-      };
-    });
-  }, [bookings, inquiries, customGuests, guestOverrides]);
+        return {
+          ...g,
+          fullName,
+          phone,
+          email,
+          address,
+          idType,
+          idNumber,
+          isVip,
+          notes,
+        };
+      });
+  }, [bookings, inquiries, customGuests, guestOverrides, deletedGuestIds]);
 
   const guestDatabaseAnalytics = useMemo(() => {
     const total = guestProfiles.length;
@@ -3495,6 +3541,24 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                           </button>
                         )}
 
+                        {/* Edit Booking */}
+                        <button
+                          onClick={() => setEditingBooking(b)}
+                          className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-lg transition-colors cursor-pointer"
+                          title="Edit Booking Details"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Delete Booking */}
+                        <button
+                          onClick={() => setDeletingBooking(b)}
+                          className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                          title="Delete Booking Record"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+
                         {/* Print Master Voucher */}
                         <button
                           onClick={() => onOpenVoucher(b)}
@@ -3740,6 +3804,24 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                           <Ban className="w-3.5 h-3.5" />
                         </button>
                       )}
+
+                      {/* Edit */}
+                      <button
+                        onClick={() => setEditingBooking(b)}
+                        className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 rounded-lg transition-colors cursor-pointer"
+                        title="Edit Booking Details"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Delete */}
+                      <button
+                        onClick={() => setDeletingBooking(b)}
+                        className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                        title="Delete Booking Record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
 
                       {/* Voucher */}
                       <button
@@ -4913,6 +4995,22 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
 
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setEditingInquiry(inq)}
+                            className="p-1.5 rounded-lg border border-[#E6D7C3] bg-[#FAF7F2] hover:bg-amber-100 text-[#8B6B10] transition-all cursor-pointer"
+                            title="Edit Inquiry Record"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingInquiry(inq)}
+                            className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 transition-all cursor-pointer"
+                            title="Delete Inquiry Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                           <a
                             href={`tel:${inq.phone}`}
                             className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold inline-flex items-center gap-1"
@@ -4968,7 +5066,25 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 pt-2 border-t border-[#E6D7C3]/40">
+                  <div className="flex items-center gap-1.5 pt-2 border-t border-[#E6D7C3]/40">
+                    <button
+                      type="button"
+                      onClick={() => setEditingInquiry(inq)}
+                      className="px-2.5 py-1.5 bg-[#FAF7F2] hover:bg-amber-100 border border-[#E6D7C3] text-[#8B6B10] rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
+                      title="Edit Inquiry Record"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeletingInquiry(inq)}
+                      className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1"
+                      title="Delete Inquiry Record"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Del</span>
+                    </button>
                     <a
                       href={`tel:${inq.phone}`}
                       className="flex-1 text-center py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"
@@ -5356,11 +5472,27 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 onClick={() => setSelectedGuestDossier(guest)}
-                                className="px-2.5 py-1.5 rounded-lg border border-[#E6D7C3] bg-[#FAF7F2] hover:bg-stone-200 text-[#2C1E15] text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
+                                className="px-2 py-1.5 rounded-lg border border-[#E6D7C3] bg-[#FAF7F2] hover:bg-stone-200 text-[#2C1E15] text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer"
                                 title="View Dossier & Stay History"
                               >
                                 <Eye className="w-3 h-3 text-[#B8860B]" />
                                 <span>Profile</span>
+                              </button>
+
+                              <button
+                                onClick={() => setEditingGuestProfile(guest)}
+                                className="p-1.5 rounded-lg border border-[#E6D7C3] bg-[#FAF7F2] hover:bg-amber-100 text-[#8B6B10] transition-all cursor-pointer"
+                                title="Edit Guest Profile"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                onClick={() => setDeletingGuestProfile(guest)}
+                                className="p-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 transition-all cursor-pointer"
+                                title="Delete Guest Record"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
 
                               <button
@@ -5461,21 +5593,41 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                     </div>
 
                     {/* Actions */}
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[#E6D7C3]/40">
+                    <div className="grid grid-cols-4 gap-1.5 pt-2 border-t border-[#E6D7C3]/40">
                       <button
                         onClick={() => setSelectedGuestDossier(guest)}
-                        className="w-full flex items-center justify-center gap-1 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] hover:bg-stone-200 text-[#2C1E15] text-xs font-bold transition-all cursor-pointer"
+                        className="flex items-center justify-center gap-1 py-1.5 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] hover:bg-stone-200 text-[#2C1E15] text-[11px] font-bold transition-all cursor-pointer"
+                        title="View Dossier"
                       >
                         <Eye className="w-3.5 h-3.5 text-[#B8860B]" />
-                        <span>View Dossier</span>
+                        <span className="hidden sm:inline">Dossier</span>
+                      </button>
+
+                      <button
+                        onClick={() => setEditingGuestProfile(guest)}
+                        className="flex items-center justify-center gap-1 py-1.5 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] hover:bg-amber-100 text-[#8B6B10] text-[11px] font-bold transition-all cursor-pointer"
+                        title="Edit Profile"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+
+                      <button
+                        onClick={() => setDeletingGuestProfile(guest)}
+                        className="flex items-center justify-center gap-1 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[11px] font-bold transition-all cursor-pointer"
+                        title="Delete Record"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Del</span>
                       </button>
 
                       <button
                         onClick={() => handleInitiateWalkinForGuest(guest)}
-                        className="w-full flex items-center justify-center gap-1 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
+                        className="flex items-center justify-center gap-1 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold transition-all cursor-pointer shadow-xs"
+                        title="Walk-In Registration"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        <span>Walk-In</span>
+                        <span>Walkin</span>
                       </button>
                     </div>
                   </div>
@@ -7255,6 +7407,682 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                 className="bg-[#2C1E15] hover:bg-[#1A1009] text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 1. EDIT GUEST PROFILE MODAL */}
+      {/* ========================================================================= */}
+      {editingGuestProfile && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-xl w-full border border-[#E6D7C3] shadow-2xl overflow-hidden my-auto">
+            <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-[#E6D7C3] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Edit2 className="w-5 h-5 text-[#B8860B]" />
+                <h3 className="font-serif font-bold text-lg sm:text-xl text-[#2C1E15]">
+                  Edit Guest Profile
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingGuestProfile(null)}
+                className="p-1.5 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                setGuestOverrides((prev) => ({
+                  ...prev,
+                  [editingGuestProfile.id]: {
+                    fullName: editingGuestProfile.fullName,
+                    phone: editingGuestProfile.phone,
+                    email: editingGuestProfile.email,
+                    address: editingGuestProfile.address,
+                    idType: editingGuestProfile.idType,
+                    idNumber: editingGuestProfile.idNumber,
+                    isVip: editingGuestProfile.isVip,
+                    notes: editingGuestProfile.notes,
+                  },
+                }));
+                setGuestToastMessage(`Guest profile for ${editingGuestProfile.fullName} updated.`);
+                setEditingGuestProfile(null);
+              }}
+              className="p-6 space-y-4 max-h-[75vh] overflow-y-auto text-xs"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Full Guest Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingGuestProfile.fullName}
+                    onChange={(e) =>
+                      setEditingGuestProfile({ ...editingGuestProfile, fullName: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-semibold outline-none focus:ring-2 focus:ring-amber-500/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Mobile Phone *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingGuestProfile.phone}
+                    onChange={(e) =>
+                      setEditingGuestProfile({ ...editingGuestProfile, phone: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-semibold outline-none focus:ring-2 focus:ring-amber-500/40"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    value={editingGuestProfile.email || ''}
+                    onChange={(e) =>
+                      setEditingGuestProfile({ ...editingGuestProfile, email: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-semibold outline-none focus:ring-2 focus:ring-amber-500/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Home / Office Address</label>
+                  <input
+                    type="text"
+                    value={editingGuestProfile.address || ''}
+                    onChange={(e) =>
+                      setEditingGuestProfile({ ...editingGuestProfile, address: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-semibold outline-none focus:ring-2 focus:ring-amber-500/40"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Valid Identification Type</label>
+                  <select
+                    value={editingGuestProfile.idType || "Driver’s License"}
+                    onChange={(e) =>
+                      setEditingGuestProfile({ ...editingGuestProfile, idType: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-semibold outline-none focus:ring-2 focus:ring-amber-500/40"
+                  >
+                    <option value="Driver’s License">Driver’s License</option>
+                    <option value="Passport">Passport</option>
+                    <option value="SSS / UMID">SSS / UMID</option>
+                    <option value="National ID (PhilSys)">National ID (PhilSys)</option>
+                    <option value="Voter’s ID">Voter’s ID</option>
+                    <option value="PRC License">PRC License</option>
+                    <option value="Company / Student ID">Company / Student ID</option>
+                    <option value="Others">Others</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">ID Card Number</label>
+                  <input
+                    type="text"
+                    value={editingGuestProfile.idNumber || ''}
+                    onChange={(e) =>
+                      setEditingGuestProfile({ ...editingGuestProfile, idNumber: e.target.value })
+                    }
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-semibold outline-none focus:ring-2 focus:ring-amber-500/40"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200 flex items-center justify-between">
+                <div>
+                  <span className="font-bold text-amber-900 block text-xs">Priority VIP Guest</span>
+                  <span className="text-[10px] text-amber-700">Grants priority guest status on Front Desk dashboard</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={!!editingGuestProfile.isVip}
+                  onChange={(e) =>
+                    setEditingGuestProfile({ ...editingGuestProfile, isVip: e.target.checked })
+                  }
+                  className="w-5 h-5 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-[#2C1E15] mb-1">Front Desk VIP / CRM Notes</label>
+                <textarea
+                  rows={3}
+                  value={editingGuestProfile.notes || ''}
+                  onChange={(e) =>
+                    setEditingGuestProfile({ ...editingGuestProfile, notes: e.target.value })
+                  }
+                  placeholder="Preferences, special requests, remarks..."
+                  className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none focus:ring-2 focus:ring-amber-500/40 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E6D7C3]">
+                <button
+                  type="button"
+                  onClick={() => setEditingGuestProfile(null)}
+                  className="px-4 py-2 rounded-xl border border-stone-300 text-xs font-bold text-stone-600 hover:bg-stone-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#B8860B] via-[#D4AF37] to-[#997A15] hover:brightness-110 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  Save Profile Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 2. DELETE GUEST PROFILE CONFIRMATION MODAL */}
+      {/* ========================================================================= */}
+      {deletingGuestProfile && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-rose-200 shadow-2xl p-6 text-center space-y-4 my-auto">
+            <div className="w-12 h-12 bg-rose-100 text-rose-700 rounded-2xl flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Delete Guest Profile?</h3>
+              <p className="text-xs text-[#786150] mt-1 leading-relaxed">
+                Are you sure you want to remove <strong className="text-[#2C1E15]">{deletingGuestProfile.fullName}</strong> ({deletingGuestProfile.phone}) from the Front Desk Guest Directory?
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingGuestProfile(null)}
+                className="flex-1 py-2.5 rounded-xl border border-stone-300 text-xs font-bold text-stone-600 hover:bg-stone-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeletedGuestIds((prev) => [...prev, deletingGuestProfile.id]);
+                  setGuestToastMessage(`Guest record for ${deletingGuestProfile.fullName} deleted.`);
+                  setDeletingGuestProfile(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3. EDIT BOOKING RECORD MODAL */}
+      {/* ========================================================================= */}
+      {editingBooking && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-2xl w-full border border-[#E6D7C3] shadow-2xl overflow-hidden my-auto">
+            <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-[#E6D7C3] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Edit2 className="w-5 h-5 text-[#B8860B]" />
+                <div>
+                  <h3 className="font-serif font-bold text-lg sm:text-xl text-[#2C1E15]">
+                    Edit Reservation Record
+                  </h3>
+                  <span className="font-mono text-xs font-bold text-[#8B6B10]">
+                    Ref: {editingBooking.id}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingBooking(null)}
+                className="p-1.5 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (onEditBooking) {
+                  onEditBooking(editingBooking);
+                } else {
+                  onUpdateBookingStatus(editingBooking.id, editingBooking.status, editingBooking.staffNotes);
+                }
+                setEditingBooking(null);
+              }}
+              className="p-6 space-y-4 max-h-[75vh] overflow-y-auto text-xs"
+            >
+              {/* Guest Details */}
+              <div className="p-3 bg-[#FAF7F2] rounded-2xl border border-[#E6D7C3]/60 space-y-3">
+                <span className="font-bold text-[#8B6B10] uppercase tracking-wider text-[10px] block">Guest Contact Details</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-semibold text-[#2C1E15] mb-1">Guest Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingBooking.guestName}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, guestName: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#2C1E15] mb-1">Guest Phone *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingBooking.guestPhone}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, guestPhone: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#2C1E15] mb-1">Guest Email</label>
+                    <input
+                      type="email"
+                      value={editingBooking.guestEmail || ''}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, guestEmail: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Room & Stay Dates */}
+              <div className="p-3 bg-[#FAF7F2] rounded-2xl border border-[#E6D7C3]/60 space-y-3">
+                <span className="font-bold text-[#8B6B10] uppercase tracking-wider text-[10px] block">Accommodation &amp; Schedule</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-[#2C1E15] mb-1">Room / Unit Title *</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingBooking.roomTitle}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, roomTitle: e.target.value })}
+                      className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-[#2C1E15] mb-1">Booking Status *</label>
+                    <select
+                      value={editingBooking.status}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, status: e.target.value as BookingStatus })}
+                      className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs font-bold text-[#2C1E15] outline-none"
+                    >
+                      <option value="Pending Slip Review">Pending Slip Review</option>
+                      <option value="Confirmed">Confirmed</option>
+                      <option value="Checked-In">Checked-In</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                </div>
+
+                {editingBooking.stayType === 'nightly' ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block font-semibold text-[#2C1E15] mb-1">Check-In Date</label>
+                      <input
+                        type="date"
+                        value={editingBooking.checkInDate || ''}
+                        onChange={(e) => setEditingBooking({ ...editingBooking, checkInDate: e.target.value })}
+                        className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#2C1E15] mb-1">Check-Out Date</label>
+                      <input
+                        type="date"
+                        value={editingBooking.checkOutDate || ''}
+                        onChange={(e) => setEditingBooking({ ...editingBooking, checkOutDate: e.target.value })}
+                        className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#2C1E15] mb-1">Nights Count</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={editingBooking.numberOfNights || 1}
+                        onChange={(e) => setEditingBooking({ ...editingBooking, numberOfNights: Number(e.target.value) })}
+                        className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-semibold text-[#2C1E15] mb-1">Hourly Date</label>
+                      <input
+                        type="date"
+                        value={editingBooking.hourlyDate || ''}
+                        onChange={(e) => setEditingBooking({ ...editingBooking, hourlyDate: e.target.value })}
+                        className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-semibold text-[#2C1E15] mb-1">Start Time</label>
+                      <input
+                        type="text"
+                        value={editingBooking.hourlyStartTime || ''}
+                        onChange={(e) => setEditingBooking({ ...editingBooking, hourlyStartTime: e.target.value })}
+                        className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Financials & Amounts */}
+              <div className="p-3 bg-[#FAF7F2] rounded-2xl border border-[#E6D7C3]/60 space-y-3">
+                <span className="font-bold text-[#8B6B10] uppercase tracking-wider text-[10px] block">Financial Breakdown</span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-semibold text-[#2C1E15] mb-1">Grand Total (₱)</label>
+                    <input
+                      type="number"
+                      value={editingBooking.grandTotal}
+                      onChange={(e) => {
+                        const gt = Number(e.target.value);
+                        const rem = Math.max(0, gt - (editingBooking.amountPaidNow || 0));
+                        setEditingBooking({ ...editingBooking, grandTotal: gt, remainingBalance: rem });
+                      }}
+                      className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs font-bold outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#2C1E15] mb-1">Amount Paid Now (₱)</label>
+                    <input
+                      type="number"
+                      value={editingBooking.amountPaidNow}
+                      onChange={(e) => {
+                        const paid = Number(e.target.value);
+                        const rem = Math.max(0, (editingBooking.grandTotal || 0) - paid);
+                        setEditingBooking({ ...editingBooking, amountPaidNow: paid, remainingBalance: rem });
+                      }}
+                      className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs font-bold text-emerald-800 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-[#2C1E15] mb-1">Remaining Balance (₱)</label>
+                    <input
+                      type="number"
+                      value={editingBooking.remainingBalance}
+                      onChange={(e) => setEditingBooking({ ...editingBooking, remainingBalance: Number(e.target.value) })}
+                      className="w-full px-3 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs font-bold text-amber-900 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-[#2C1E15] mb-1">Staff Notes &amp; Remarks</label>
+                <textarea
+                  rows={2}
+                  value={editingBooking.staffNotes || ''}
+                  onChange={(e) => setEditingBooking({ ...editingBooking, staffNotes: e.target.value })}
+                  placeholder="Front desk internal remarks..."
+                  className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E6D7C3]">
+                <button
+                  type="button"
+                  onClick={() => setEditingBooking(null)}
+                  className="px-4 py-2 rounded-xl border border-stone-300 text-xs font-bold text-stone-600 hover:bg-stone-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#B8860B] via-[#D4AF37] to-[#997A15] hover:brightness-110 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  Save Booking Record
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 4. DELETE BOOKING RECORD CONFIRMATION MODAL */}
+      {/* ========================================================================= */}
+      {deletingBooking && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-rose-200 shadow-2xl p-6 text-center space-y-4 my-auto">
+            <div className="w-12 h-12 bg-rose-100 text-rose-700 rounded-2xl flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Permanently Delete Booking?</h3>
+              <p className="text-xs text-[#786150] mt-1 leading-relaxed">
+                Are you sure you want to permanently delete reservation <strong className="font-mono text-[#2C1E15]">{deletingBooking.id}</strong> for <strong className="text-[#2C1E15]">{deletingBooking.guestName}</strong>?
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingBooking(null)}
+                className="flex-1 py-2.5 rounded-xl border border-stone-300 text-xs font-bold text-stone-600 hover:bg-stone-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteBooking) {
+                    onDeleteBooking(deletingBooking.id);
+                  } else {
+                    onUpdateBookingStatus(deletingBooking.id, 'Cancelled', 'Permanently deleted by Front Desk');
+                  }
+                  setDeletingBooking(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 5. EDIT INQUIRY MODAL */}
+      {/* ========================================================================= */}
+      {editingInquiry && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-xl w-full border border-[#E6D7C3] shadow-2xl overflow-hidden my-auto">
+            <div className="p-5 sm:p-6 bg-[#FAF7F2] border-b border-[#E6D7C3] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Edit2 className="w-5 h-5 text-[#B8860B]" />
+                <h3 className="font-serif font-bold text-lg sm:text-xl text-[#2C1E15]">
+                  Edit Guest Inquiry
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingInquiry(null)}
+                className="p-1.5 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-200 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (onEditInquiry) {
+                  onEditInquiry(editingInquiry);
+                } else {
+                  try {
+                    const saved = JSON.parse(localStorage.getItem('diversion_vigan_inquiries') || '[]');
+                    const updatedList = saved.map((i: InquiryRecord) => (i.id === editingInquiry.id ? editingInquiry : i));
+                    localStorage.setItem('diversion_vigan_inquiries', JSON.stringify(updatedList));
+                  } catch {}
+                }
+                setEditingInquiry(null);
+              }}
+              className="p-6 space-y-4 text-xs"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Full Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingInquiry.fullName}
+                    onChange={(e) => setEditingInquiry({ ...editingInquiry, fullName: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Phone Number *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingInquiry.phone}
+                    onChange={(e) => setEditingInquiry({ ...editingInquiry, phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    value={editingInquiry.email || ''}
+                    onChange={(e) => setEditingInquiry({ ...editingInquiry, email: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Status</label>
+                  <select
+                    value={editingInquiry.status || 'New'}
+                    onChange={(e) => setEditingInquiry({ ...editingInquiry, status: e.target.value as any })}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-bold outline-none"
+                  >
+                    <option value="New">New</option>
+                    <option value="Replied">Replied</option>
+                    <option value="Archived">Archived</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Room / Accommodation Interest</label>
+                  <input
+                    type="text"
+                    value={editingInquiry.roomInterest || ''}
+                    onChange={(e) => setEditingInquiry({ ...editingInquiry, roomInterest: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-[#2C1E15] mb-1">Target Stay Dates</label>
+                  <input
+                    type="text"
+                    value={editingInquiry.targetDates || ''}
+                    onChange={(e) => setEditingInquiry({ ...editingInquiry, targetDates: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-[#2C1E15] mb-1">Inquiry Message</label>
+                <textarea
+                  rows={3}
+                  value={editingInquiry.message || ''}
+                  onChange={(e) => setEditingInquiry({ ...editingInquiry, message: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E6D7C3]">
+                <button
+                  type="button"
+                  onClick={() => setEditingInquiry(null)}
+                  className="px-4 py-2 rounded-xl border border-stone-300 text-xs font-bold text-stone-600 hover:bg-stone-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#B8860B] via-[#D4AF37] to-[#997A15] hover:brightness-110 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  Save Inquiry Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 6. DELETE INQUIRY CONFIRMATION MODAL */}
+      {/* ========================================================================= */}
+      {deletingInquiry && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-rose-200 shadow-2xl p-6 text-center space-y-4 my-auto">
+            <div className="w-12 h-12 bg-rose-100 text-rose-700 rounded-2xl flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Delete Guest Inquiry?</h3>
+              <p className="text-xs text-[#786150] mt-1 leading-relaxed">
+                Are you sure you want to delete inquiry from <strong className="text-[#2C1E15]">{deletingInquiry.fullName}</strong> ({deletingInquiry.phone})?
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingInquiry(null)}
+                className="flex-1 py-2.5 rounded-xl border border-stone-300 text-xs font-bold text-stone-600 hover:bg-stone-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteInquiry) {
+                    onDeleteInquiry(deletingInquiry.id);
+                  } else {
+                    try {
+                      const saved = JSON.parse(localStorage.getItem('diversion_vigan_inquiries') || '[]');
+                      const filtered = saved.filter((i: InquiryRecord) => i.id !== deletingInquiry.id);
+                      localStorage.setItem('diversion_vigan_inquiries', JSON.stringify(filtered));
+                    } catch {}
+                  }
+                  setDeletingInquiry(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+              >
+                Confirm Delete
               </button>
             </div>
           </div>

@@ -294,6 +294,48 @@ export const Storage = {
     return found;
   },
 
+  updateInquiry(id: string, updatedInquiry: InquiryRecord): InquiryRecord | null {
+    const list = this.getInquiries();
+    let found: InquiryRecord | null = null;
+    const updated = list.map((inq) => {
+      if (inq.id === id) {
+        found = { ...inq, ...updatedInquiry, id };
+        return found;
+      }
+      return inq;
+    });
+    if (found) {
+      this.saveInquiries(updated);
+    }
+    return found;
+  },
+
+  deleteInquiry(id: string): boolean {
+    const list = this.getInquiries();
+    const filtered = list.filter((inq) => inq.id !== id);
+    if (filtered.length !== list.length) {
+      this.saveInquiries(filtered);
+      return true;
+    }
+    return false;
+  },
+
+  updateBooking(id: string, updatedBooking: BookingRecord): BookingRecord | null {
+    const list = this.getBookings();
+    let found: BookingRecord | null = null;
+    const updated = list.map((b) => {
+      if (b.id === id) {
+        found = { ...b, ...updatedBooking, id };
+        return found;
+      }
+      return b;
+    });
+    if (found) {
+      this.saveBookings(updated);
+    }
+    return found;
+  },
+
   // Rooms Inventory
   getRooms(): RoomUnit[] {
     return readJsonFile<RoomUnit[]>(ROOMS_FILE, ROOMS_DATA);

@@ -218,7 +218,11 @@ export interface PresetQA {
   keywords: string;
   answer: string;
   showAsChip?: boolean;
+  category?: string;
+  isActive?: boolean;
 }
+
+export type PresetQAItem = PresetQA;
 
 export const DEFAULT_PRESET_QAS: PresetQA[] = [
   {

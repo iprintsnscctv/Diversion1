@@ -359,6 +359,62 @@ export default function App() {
     }
   }, []);
 
+  // Handle full edit of a booking
+  const handleEditBooking = useCallback(async (updatedBooking: BookingRecord) => {
+    setBookings((prev) => prev.map((b) => (b.id === updatedBooking.id ? updatedBooking : b)));
+    showToast(`Booking ${updatedBooking.id} updated successfully.`);
+    try {
+      await fetch(`/api/bookings/${updatedBooking.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedBooking),
+      });
+    } catch (err) {
+      console.error('Failed to sync updated booking to server:', err);
+    }
+  }, []);
+
+  // Handle permanent deletion of a booking
+  const handleDeleteBooking = useCallback(async (bookingId: string) => {
+    setBookings((prev) => prev.filter((b) => b.id !== bookingId));
+    showToast(`Booking ${bookingId} permanently deleted.`);
+    try {
+      await fetch(`/api/bookings/${bookingId}`, {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.error('Failed to delete booking on server:', err);
+    }
+  }, []);
+
+  // Handle edit of an inquiry
+  const handleEditInquiry = useCallback(async (updatedInquiry: InquiryRecord) => {
+    setInquiries((prev) => prev.map((inq) => (inq.id === updatedInquiry.id ? updatedInquiry : inq)));
+    showToast('Inquiry record updated.');
+    try {
+      await fetch(`/api/inquiries/${updatedInquiry.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedInquiry),
+      });
+    } catch (err) {
+      console.error('Failed to update inquiry on server:', err);
+    }
+  }, []);
+
+  // Handle deletion of an inquiry
+  const handleDeleteInquiry = useCallback(async (inquiryId: string) => {
+    setInquiries((prev) => prev.filter((inq) => inq.id !== inquiryId));
+    showToast('Inquiry record deleted.');
+    try {
+      await fetch(`/api/inquiries/${inquiryId}`, {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.error('Failed to delete inquiry on server:', err);
+    }
+  }, []);
+
   // Handle walk-in reservation from Admin Desk
   const handleAddWalkinBooking = useCallback(async (walkin: BookingRecord) => {
     setBookings((prev) => [walkin, ...prev]);
@@ -510,6 +566,11 @@ export default function App() {
             bookings={bookings}
             onUpdateBookingStatus={handleUpdateBookingStatus}
             onRebookBooking={handleRebookBooking}
+            onEditBooking={handleEditBooking}
+            onDeleteBooking={handleDeleteBooking}
+            inquiries={inquiries}
+            onEditInquiry={handleEditInquiry}
+            onDeleteInquiry={handleDeleteInquiry}
             onOpenVoucher={(booking) => setActiveVoucherBooking(booking)}
             onOpenSlipLightbox={(booking) => setLightboxSlipBooking(booking)}
             onAddWalkinBooking={handleAddWalkinBooking}
