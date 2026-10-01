@@ -1,0 +1,273 @@
+import express from 'express';
+import { createServer as createViteServer } from 'vite';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { Storage } from './server/storage';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+async function startServer() {
+  const app = express();
+  const PORT = Number(process.env.PORT) || 3000;
+
+  app.use(express.json({ limit: '20mb' }));
+
+  // ==========================================
+  // BOOKINGS REST API ENDPOINTS
+  // ==========================================
+
+  // 1. GET all bookings
+  app.get('/api/bookings', (_req, res) => {
+    try {
+      const bookings = Storage.getBookings();
+      res.json({ success: true, count: bookings.length, data: bookings });
+    } catch (err: any) {
+      console.error('Error fetching bookings:', err);
+      res.status(500).json({ success: false, error: 'Failed to fetch bookings.' });
+    }
+  });
+
+  // 2. POST create new booking (with date conflict check)
+  app.post('/api/bookings', (req, res) => {
+    try {
+      const bookingData = req.body;
+
+      if (!bookingData.guestName || !bookingData.guestPhone || !bookingData.roomId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing mandatory fields: Guest name, phone, and accommodation unit are required.'
+        });
+      }
+
+      // Check for date collision to prevent double-booking
+      const conflict = Storage.hasDateConflict(
+        bookingData.roomId,
+        bookingData.stayType,
+        bookingData.checkInDate,
+        bookingData.checkOutDate,
+        bookingData.hourlyDate
+      );
+
+      if (conflict.hasConflict) {
+        return res.status(409).json({
+          success: false,
+          error: `Selected dates are already booked for ${bookingData.roomTitle || 'this room'}. Please select available dates.`,
+          conflictingBookingId: conflict.conflictingBooking?.id
+        });
+      }
+
+      // Ensure unique ID if not provided
+      if (!bookingData.id) {
+        bookingData.id = `DV-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+      }
+      if (!bookingData.createdAt) {
+        bookingData.createdAt = new Date().toISOString();
+      }
+
+      const created = Storage.addBooking(bookingData);
+      res.status(201).json({ success: true, data: created });
+    } catch (err: any) {
+      console.error('Error creating booking:', err);
+      res.status(500).json({ success: false, error: 'Failed to create booking.' });
+    }
+  });
+
+  // 3. PATCH update booking status (Approve slip, check-in, check-out, cancel)
+  app.patch('/api/bookings/:id/status', (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status, notes, cancellationReason } = req.body;
+
+      if (!status) {
+        return res.status(400).json({ success: false, error: 'Status is required.' });
+      }
+
+      const updated = Storage.updateBookingStatus(id, status, notes, cancellationReason);
+      if (!updated) {
+        return res.status(404).json({ success: false, error: `Booking ${id} not found.` });
+      }
+
+      res.json({ success: true, data: updated });
+    } catch (err: any) {
+      console.error(`Error updating booking status for ${req.params.id}:`, err);
+      res.status(500).json({ success: false, error: 'Failed to update booking status.' });
+    }
+  });
+
+  // 4. PUT rebook dates / room
+  app.put('/api/bookings/:id/rebook', (req, res) => {
+    try {
+      const { id } = req.params;
+      const { updatedFields, note } = req.body;
+
+      if (!updatedFields) {
+        return res.status(400).json({ success: false, error: 'Updated fields are required.' });
+      }
+
+      // Check conflict with new target dates (excluding self)
+      const targetRoomId = updatedFields.roomId;
+      const targetStayType = updatedFields.stayType;
+      const targetCheckIn = updatedFields.checkInDate;
+      const targetCheckOut = updatedFields.checkOutDate;
+      const targetHourlyDate = updatedFields.hourlyDate;
+
+      if (targetRoomId) {
+        const conflict = Storage.hasDateConflict(
+          targetRoomId,
+          targetStayType,
+          targetCheckIn,
+          targetCheckOut,
+          targetHourlyDate,
+          id
+        );
+        if (conflict.hasConflict) {
+          return res.status(409).json({
+            success: false,
+            error: 'Target rebooking dates conflict with an existing reservation.',
+            conflictingBookingId: conflict.conflictingBooking?.id
+          });
+        }
+      }
+
+      const rebooked = Storage.rebook(id, updatedFields, note || 'Front Desk rebooking');
+      if (!rebooked) {
+        return res.status(404).json({ success: false, error: `Booking ${id} not found.` });
+      }
+
+      res.json({ success: true, data: rebooked });
+    } catch (err: any) {
+      console.error(`Error rebooking ${req.params.id}:`, err);
+      res.status(500).json({ success: false, error: 'Failed to rebook reservation.' });
+    }
+  });
+
+  // 5. DELETE cancel/delete booking
+  app.delete('/api/bookings/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = Storage.deleteBooking(id);
+      if (!deleted) {
+        return res.status(404).json({ success: false, error: `Booking ${id} not found.` });
+      }
+      res.json({ success: true, message: `Booking ${id} deleted.` });
+    } catch (err: any) {
+      console.error(`Error deleting booking ${req.params.id}:`, err);
+      res.status(500).json({ success: false, error: 'Failed to delete booking.' });
+    }
+  });
+
+  // ==========================================
+  // INQUIRIES REST API ENDPOINTS
+  // ==========================================
+
+  app.get('/api/inquiries', (_req, res) => {
+    try {
+      const inquiries = Storage.getInquiries();
+      res.json({ success: true, count: inquiries.length, data: inquiries });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: 'Failed to fetch inquiries.' });
+    }
+  });
+
+  app.post('/api/inquiries', (req, res) => {
+    try {
+      const inq = req.body;
+      if (!inq.fullName || !inq.phone) {
+        return res.status(400).json({ success: false, error: 'Full name and phone are required.' });
+      }
+      if (!inq.id) {
+        inq.id = `INQ-${Math.floor(1000 + Math.random() * 9000)}`;
+      }
+      if (!inq.createdAt) {
+        inq.createdAt = new Date().toISOString();
+      }
+      if (!inq.status) {
+        inq.status = 'New';
+      }
+      const created = Storage.addInquiry(inq);
+      res.status(201).json({ success: true, data: created });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: 'Failed to save inquiry.' });
+    }
+  });
+
+  app.patch('/api/inquiries/:id/status', (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      const updated = Storage.updateInquiryStatus(id, status);
+      if (!updated) {
+        return res.status(404).json({ success: false, error: 'Inquiry not found.' });
+      }
+      res.json({ success: true, data: updated });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: 'Failed to update inquiry.' });
+    }
+  });
+
+  // ==========================================
+  // ROOMS INVENTORY REST API
+  // ==========================================
+
+  app.get('/api/rooms', (_req, res) => {
+    try {
+      const rooms = Storage.getRooms();
+      res.json({ success: true, data: rooms });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: 'Failed to fetch rooms.' });
+    }
+  });
+
+  app.put('/api/rooms', (req, res) => {
+    try {
+      const { rooms } = req.body;
+      if (!Array.isArray(rooms)) {
+        return res.status(400).json({ success: false, error: 'Rooms must be an array.' });
+      }
+      Storage.saveRooms(rooms);
+      res.json({ success: true, data: rooms });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: 'Failed to save rooms.' });
+    }
+  });
+
+  // Health and Sync status check
+  app.get('/api/health', (_req, res) => {
+    const bookings = Storage.getBookings();
+    res.json({
+      status: 'healthy',
+      serverTime: new Date().toISOString(),
+      bookingsCount: bookings.length,
+    });
+  });
+
+  // One-click deployment bundle download for VPS
+  app.get('/api/download/bundle', (_req, res) => {
+    const bundlePath = path.resolve(__dirname, 'public', 'dv2-app-bundle.tar.gz');
+    res.download(bundlePath, 'dv2-app-bundle.tar.gz');
+  });
+
+  // Vite integration
+  if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.resolve(__dirname, 'dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+    });
+  } else {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Diversion Vigan Server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer();

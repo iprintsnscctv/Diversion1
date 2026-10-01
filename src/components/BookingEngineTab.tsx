@@ -1,0 +1,2912 @@
+import { registerGuestAccount } from '../utils/guestAuth';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { 
+  RoomUnit, 
+  StayType, 
+  BookingAddonItem, 
+  PaymentOption, 
+  PaymentMethod, 
+  BookingRecord 
+} from '../types';
+import { 
+  Eye,
+  EyeOff,
+  KeyRound,
+  Calendar as CalendarIcon, 
+  Clock, 
+  Users, 
+  Plus, 
+  Minus, 
+  Check, 
+  Copy, 
+  Upload, 
+  AlertCircle, 
+  CreditCard, 
+  Smartphone, 
+  Building2, 
+  ShieldCheck, 
+  CheckCircle2, 
+  Trash2, 
+  Receipt,
+  DollarSign,
+  ArrowLeft,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  Waves,
+  Sparkles,
+  Wind,
+  Wifi,
+  Car,
+  UtensilsCrossed,
+  Lock
+} from 'lucide-react';
+import { VillaLogo } from './VillaLogo';
+import { INITIAL_BOOKINGS } from '../data/roomsData';
+
+interface BookingEngineTabProps {
+  rooms: RoomUnit[];
+  availableAddons: BookingAddonItem[];
+  existingBookings?: BookingRecord[];
+  preselectedRoomId?: string;
+  preselectedStayType?: StayType;
+  onBookingCreated: (booking: BookingRecord) => void;
+  onBack?: () => void;
+}
+
+export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
+  rooms,
+  availableAddons,
+  existingBookings,
+  preselectedRoomId,
+  preselectedStayType,
+  onBookingCreated,
+  onBack,
+}) => {
+  // Step 1: Room Selection
+  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>(
+    preselectedRoomId ? [preselectedRoomId] : []
+  );
+  const [preferredRoomNumber, setPreferredRoomNumber] = useState<string>('Any Available');
+
+  // Dropdown selection states for Room Number and Pax Rate under Accommodation Unit
+  const [selectedRoomNumberFilter, setSelectedRoomNumberFilter] = useState<string>(
+    preselectedRoomId || ''
+  );
+  const [selectedPaxRateFilter, setSelectedPaxRateFilter] = useState<string>('all');
+
+  // Available pax rate options for dropdown
+  const availablePaxRateOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    rooms.forEach((r) => {
+      r.paxRates?.forEach((pr) => {
+        if (pr.paxLabel) {
+          map.set(pr.paxLabel, pr.paxLabel);
+        }
+      });
+    });
+    return Array.from(map.keys());
+  }, [rooms]);
+
+  // Filtered rooms based on Room Number and Pax Rate dropdowns
+  const filteredDisplayRooms = useMemo(() => {
+    return rooms.filter((room) => {
+      const matchRoom =
+        !selectedRoomNumberFilter ||
+        selectedRoomNumberFilter === 'all' ||
+        room.id === selectedRoomNumberFilter;
+      const matchPax =
+        selectedPaxRateFilter === 'all' ||
+        (room.paxRates && room.paxRates.some((pr) => pr.paxLabel.toLowerCase() === selectedPaxRateFilter.toLowerCase()));
+      return matchRoom && matchPax;
+    });
+  }, [rooms, selectedRoomNumberFilter, selectedPaxRateFilter]);
+
+  // Step 2: Stay Type & Schedule
+  const [stayType, setStayType] = useState<StayType>(
+    preselectedStayType || 'nightly'
+  );
+
+  // Today and Tomorrow default dates
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const tomorrowStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  }, []);
+
+  const [checkInDate, setCheckInDate] = useState<string>(todayStr);
+  const [checkOutDate, setCheckOutDate] = useState<string>(tomorrowStr);
+
+  const [hourlyDate, setHourlyDate] = useState<string>(todayStr);
+  const [hourlyStartTime, setHourlyStartTime] = useState<string>('14:00');
+  const [hourlyDuration, setHourlyDuration] = useState<3 | 6 | 12>(3);
+
+  // Availability Calendar state: Current viewing month
+  const [calendarViewDate, setCalendarViewDate] = useState<Date>(() => new Date());
+  const [calendarNotice, setCalendarNotice] = useState<string>('');
+
+  // Guest Count with Age-Based Additional Pax Breakdown
+  const [adultGuests, setAdultGuests] = useState<number>(2);
+  const [child6to10Guests, setChild6to10Guests] = useState<number>(0);
+  const [child1to5Guests, setChild1to5Guests] = useState<number>(0);
+
+  const childGuests = child6to10Guests + child1to5Guests;
+
+  // Step 3: Add-ons state with quantity map
+  const [addonQuantities, setAddonQuantities] = useState<{ [addonId: string]: number }>({
+    extra_pax_all_rooms: 0,
+    breakfast_set: 0,
+    extra_pad: 0,
+    extra_pax: 0,
+    billiards_darts: 0,
+    tour_van: 0,
+  });
+
+  // Track extra pax per room (max 1 for eligible rooms: Room 0, 1, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15)
+  const [roomExtraPaxMap, setRoomExtraPaxMap] = useState<{ [roomId: string]: number }>({});
+  // Track selected pax quantity per room unit / villa
+  const [roomPaxQuantityMap, setRoomPaxQuantityMap] = useState<{ [roomId: string]: number }>({});
+
+  // Step 4: Guest Contact Details & Registration
+  const [guestName, setGuestName] = useState<string>('');
+  const [guestPhone, setGuestPhone] = useState<string>('');
+  const [guestEmail, setGuestEmail] = useState<string>('');
+  const [guestUsername, setGuestUsername] = useState<string>('');
+  const [guestPassword, setGuestPassword] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [formErrors, setFormErrors] = useState<{ [field: string]: string }>({});
+
+  // Step 5: Payment Option (100% Full vs 40% Partial Downpayment)
+  const [paymentOption, setPaymentOption] = useState<PaymentOption>('partial_40');
+
+  // Step 6: Payment Method
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('gcash');
+
+  // Step 7: Mandatory Payment Slip Upload
+  const [slipFile, setSlipFile] = useState<File | null>(null);
+  const [slipPreviewUrl, setSlipPreviewUrl] = useState<string | null>(null);
+  const [slipUploadError, setSlipUploadError] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Helper copy states
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Update room when preselected props change
+  useEffect(() => {
+    if (preselectedRoomId) {
+      setSelectedRoomIds([preselectedRoomId]);
+      setSelectedRoomNumberFilter(preselectedRoomId);
+    }
+    if (preselectedStayType) {
+      setStayType(preselectedStayType);
+    }
+  }, [preselectedRoomId, preselectedStayType]);
+
+  const selectedRooms = useMemo(() => {
+    return rooms.filter((r) => selectedRoomIds.includes(r.id));
+  }, [rooms, selectedRoomIds]);
+
+  const selectedRoom: RoomUnit | null = selectedRooms[0] || null;
+
+  // Grouped room choices with quantities (multipliers)
+  const selectedRoomsGrouped = useMemo(() => {
+    const map = new Map<string, { category: string; count: number; roomNumbers: string[]; rooms: typeof rooms }>();
+    selectedRooms.forEach((r) => {
+      const cat = r.category || r.title;
+      const rn = r.roomNumber || r.title.split("–")[0].trim();
+      const existing = map.get(cat);
+      if (existing) {
+        existing.count += 1;
+        existing.roomNumbers.push(rn);
+        existing.rooms.push(r);
+      } else {
+        map.set(cat, {
+          category: cat,
+          count: 1,
+          roomNumbers: [rn],
+          rooms: [r],
+        });
+      }
+    });
+    return Array.from(map.values());
+  }, [selectedRooms]);
+
+  // Total pax headcount
+  const totalPax = useMemo(() => {
+    return Math.max(1, adultGuests + child6to10Guests + child1to5Guests);
+  }, [adultGuests, child6to10Guests, child1to5Guests]);
+
+  // Compute booked dates for currently selected room unit
+  const bookedDatesSet = useMemo(() => {
+    const set = new Set<string>();
+    const list = existingBookings && existingBookings.length > 0 ? existingBookings : INITIAL_BOOKINGS;
+
+    list.forEach((b) => {
+      if (selectedRoomIds.includes(b.roomId) && b.status !== 'Cancelled') {
+        if (b.stayType === 'nightly' && b.checkInDate && b.checkOutDate) {
+          const cur = new Date(b.checkInDate);
+          const end = new Date(b.checkOutDate);
+          while (cur < end) {
+            set.add(cur.toISOString().split('T')[0]);
+            cur.setDate(cur.getDate() + 1);
+          }
+        } else if (b.hourlyDate) {
+          set.add(b.hourlyDate);
+        }
+      }
+    });
+
+    return set;
+  }, [existingBookings, selectedRoomIds]);
+
+  // Compute number of nights for nightly stays
+  const calculatedNights = useMemo(() => {
+    if (stayType !== 'nightly') return 1;
+    const start = new Date(checkInDate);
+    const end = new Date(checkOutDate);
+    const diffTime = end.getTime() - start.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > 0 ? diffDays : 1;
+  }, [stayType, checkInDate, checkOutDate]);
+
+  // Helper: format rate display range dynamically from room.paxRates
+  const formatRateDisplay = (room: RoomUnit) => {
+    if (!room) return { weekdayStr: '', weekendStr: '' };
+    if (room.paxRates && room.paxRates.length > 0) {
+      const wDayMin = Math.min(...room.paxRates.map((t) => t.weekdayRate));
+      const wDayMax = Math.max(...room.paxRates.map((t) => t.weekdayRate));
+      const wEndMin = Math.min(...room.paxRates.map((t) => t.weekendRate));
+      const wEndMax = Math.max(...room.paxRates.map((t) => t.weekendRate));
+
+      const weekdayStr = wDayMin === wDayMax ? `₱${wDayMin.toLocaleString()}` : `₱${wDayMin.toLocaleString()} – ₱${wDayMax.toLocaleString()}`;
+      const weekendStr = wEndMin === wEndMax ? `₱${wEndMin.toLocaleString()}` : `₱${wEndMin.toLocaleString()} – ₱${wEndMax.toLocaleString()}`;
+
+      return { weekdayStr, weekendStr };
+    }
+    return {
+      weekdayStr: room.weekdayRateDisplay || `₱${room.pricing?.nightly?.toLocaleString() || '1,000'}`,
+      weekendStr: room.weekendRateDisplay || `₱${((room.pricing?.nightly || 1000) + 200).toLocaleString()}`,
+    };
+  };
+
+  // Helper: Get exact rate for a single night given date, room, and guest breakdown
+  const getNightlyRateForDate = (
+    date: Date,
+    room: RoomUnit,
+    adults: number,
+    kids6to10: number = 0,
+    toddlers1to5: number = 0
+  ): number => {
+    const day = date.getDay(); // 0 = Sun, 1 = Mon, ..., 5 = Fri, 6 = Sat
+    // Sun to Thu: 0, 1, 2, 3, 4 | Fri to Sat: 5, 6
+    const isWeekend = day === 5 || day === 6;
+
+    if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+      // Mon to Fri: 1, 2, 3, 4, 5 (Monday to Friday) -> ₱8,000 base (1-10 pax)
+      // Sat to Sun: 6, 0 (Saturday to Sunday) -> ₱10,000 base (1-10 pax)
+      const isSatSun = day === 6 || day === 0;
+      const baseVillaRate = isSatSun ? 10000 : 8000;
+
+      // 3 yrs below (sneak-in) are free of charge
+      const effectiveAdults = roomPaxQuantityMap[room.id] ? roomPaxQuantityMap[room.id] : adults;
+      const effectiveKids = roomPaxQuantityMap[room.id] ? 0 : kids6to10;
+
+      let extraAdultFee = 0;
+      let extraChildFee = 0;
+
+      if (roomPaxQuantityMap[room.id]) {
+        const totalPax = roomPaxQuantityMap[room.id];
+        const extraPax = Math.max(0, totalPax - 10);
+        extraAdultFee = extraPax * 500;
+      } else {
+        const totalCount = effectiveAdults + effectiveKids;
+        if (totalCount > 10) {
+          if (effectiveAdults >= 10) {
+            const extraAdults = effectiveAdults - 10;
+            const extraKids = effectiveKids;
+            extraAdultFee = extraAdults * 500;
+            extraChildFee = extraKids * (isSatSun ? 500 : 400);
+          } else {
+            const baseKidsCount = 10 - effectiveAdults;
+            const extraKids = Math.max(0, effectiveKids - baseKidsCount);
+            extraChildFee = extraKids * (isSatSun ? 500 : 400);
+          }
+        }
+      }
+
+      return baseVillaRate + extraAdultFee + extraChildFee;
+    }
+
+    // Room 0 to 13 and 14 to 16 tier calculations:
+    let baseRate = room.pricing.nightly;
+    if (room.paxRates && room.paxRates.length > 0) {
+      const effectiveAdults = roomPaxQuantityMap[room.id] || Math.max(1, adults);
+      const tier = room.paxRates.find((t) => effectiveAdults <= t.pax);
+      if (tier) {
+        baseRate = isWeekend ? tier.weekendRate : tier.weekdayRate;
+      } else {
+        const lastTier = room.paxRates[room.paxRates.length - 1];
+        const lastRate = isWeekend ? lastTier.weekendRate : lastTier.weekdayRate;
+        const extraPaxCount = effectiveAdults - lastTier.pax;
+        const extraFeePerPax = room.extraPaxFee !== undefined ? room.extraPaxFee : (isWeekend ? 350 : 300);
+        baseRate = lastRate + extraPaxCount * extraFeePerPax;
+      }
+    }
+
+    // Additional Pax Policy for Room 0 to 13 and 14 to 16:
+    // 1-5 yrs: Free
+    // 6-10 yrs: P200 Per Pax (Sun-Thu) | P250 Per Pax (Fri-Sat)
+    const child6to10Rate = isWeekend ? 250 : 200;
+    const additionalKidsFee = kids6to10 * child6to10Rate;
+
+    return baseRate + additionalKidsFee;
+  };
+
+  // Night-by-night breakdown with day names and rates (summed across all selected room units)
+  const nightlyBreakdown = useMemo(() => {
+    if (!selectedRooms || selectedRooms.length === 0 || stayType !== 'nightly') return [];
+    const list: {
+      dateStr: string;
+      label: string;
+      isWeekend: boolean;
+      rate: number;
+      baseRateSum: number;
+      child6to10Cost: number;
+    }[] = [];
+    const start = new Date(checkInDate);
+    const end = new Date(checkOutDate);
+
+    const cur = new Date(start);
+    while (cur < end) {
+      const dateStr = cur.toISOString().split('T')[0];
+      const day = cur.getDay();
+      const isWeekend = day === 5 || day === 6;
+      const label = cur.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const rate = selectedRooms.reduce(
+        (sum, r) => sum + getNightlyRateForDate(cur, r, adultGuests, child6to10Guests, child1to5Guests),
+        0
+      );
+      const childRatePerPax = isWeekend ? 250 : 200;
+      const child6to10Cost = child6to10Guests * childRatePerPax;
+      const baseRateSum = Math.max(0, rate - child6to10Cost);
+
+      list.push({ dateStr, label, isWeekend, rate, baseRateSum, child6to10Cost });
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    // Safety fallback if checkInDate >= checkOutDate
+    if (list.length === 0) {
+      const cur = new Date(checkInDate);
+      const day = cur.getDay();
+      const isWeekend = day === 5 || day === 6;
+      const label = cur.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      const rate = selectedRooms.reduce(
+        (sum, r) => sum + getNightlyRateForDate(cur, r, adultGuests, child6to10Guests, child1to5Guests),
+        0
+      );
+      const childRatePerPax = isWeekend ? 250 : 200;
+      const child6to10Cost = child6to10Guests * childRatePerPax;
+      const baseRateSum = Math.max(0, rate - child6to10Cost);
+      list.push({ dateStr: checkInDate, label, isWeekend, rate, baseRateSum, child6to10Cost });
+    }
+
+    return list;
+  }, [selectedRooms, stayType, checkInDate, checkOutDate, adultGuests, child6to10Guests, child1to5Guests, roomPaxQuantityMap]);
+
+  // Base stay cost computation (multiplied and summed across all selected rooms)
+  const baseStayRate = useMemo(() => {
+    if (!selectedRooms || selectedRooms.length === 0) return 0;
+    if (stayType === 'nightly') {
+      return nightlyBreakdown.reduce((sum, item) => sum + item.rate, 0);
+    } else {
+      return selectedRooms.reduce((roomSum, r) => {
+        let rRate = 0;
+        if (hourlyDuration === 3) rRate = r.pricing.hourly3hr || 500;
+        else if (hourlyDuration === 6) rRate = r.pricing.hourly6hr || 800;
+        else rRate = r.pricing.hourly12hr || 1100;
+        return roomSum + rRate;
+      }, 0);
+    }
+  }, [selectedRooms, stayType, nightlyBreakdown, hourlyDuration]);
+
+  // Room type cost breakdown with multipliers for the stay summary
+  const roomTypesBreakdown = useMemo(() => {
+    return selectedRoomsGrouped.map((group) => {
+      let groupCost = 0;
+      group.rooms.forEach((r) => {
+        if (stayType === 'nightly') {
+          const start = new Date(checkInDate);
+          const end = new Date(checkOutDate);
+          const cur = new Date(start);
+          while (cur < end) {
+            groupCost += getNightlyRateForDate(cur, r, adultGuests, child6to10Guests, child1to5Guests);
+            cur.setDate(cur.getDate() + 1);
+          }
+          if (start >= end) {
+            groupCost += getNightlyRateForDate(start, r, adultGuests, child6to10Guests, child1to5Guests);
+          }
+        } else {
+          if (hourlyDuration === 3) groupCost += r.pricing.hourly3hr || 500;
+          else if (hourlyDuration === 6) groupCost += r.pricing.hourly6hr || 800;
+          else groupCost += r.pricing.hourly12hr || 1100;
+        }
+      });
+      return {
+        category: group.category,
+        count: group.count,
+        roomNumbers: group.roomNumbers,
+        totalCost: groupCost,
+        avgPerRoom: group.count > 0 ? Math.round(groupCost / group.count) : 0,
+      };
+    });
+  }, [selectedRoomsGrouped, stayType, checkInDate, checkOutDate, hourlyDuration, adultGuests, child6to10Guests, child1to5Guests, roomPaxQuantityMap]);
+
+  // Dynamic single-pax rate info for Extra Pax based on calendar date day (Sunday to Monday ₱300, Friday to Saturday ₱350)
+  const extraPaxCalendarRateInfo = useMemo(() => {
+    const weekdayRate = 300;
+    const weekendRate = 350;
+
+    if (stayType === 'nightly') {
+      if (nightlyBreakdown.length > 0) {
+        if (nightlyBreakdown.length === 1) {
+          const item = nightlyBreakdown[0];
+          const rate = item.isWeekend ? weekendRate : weekdayRate;
+          return {
+            rate,
+            unitLabel: `₱${rate.toLocaleString()} / extra pax / night`,
+            dayDesc: item.isWeekend ? 'Friday to Saturday rate (₱350)' : 'Sunday to Monday rate (₱300)',
+            fullLabel: `₱${rate.toLocaleString()} / night (${item.label})`,
+            isMixed: false,
+          };
+        }
+
+        const weekendCount = nightlyBreakdown.filter((n) => n.isWeekend).length;
+        const weekdayCount = nightlyBreakdown.length - weekendCount;
+
+        if (weekendCount === nightlyBreakdown.length) {
+          return {
+            rate: weekendRate,
+            unitLabel: `₱${weekendRate.toLocaleString()} / extra pax / night`,
+            dayDesc: 'Friday to Saturday rate (₱350)',
+            fullLabel: `₱${weekendRate.toLocaleString()} / night (${weekendCount} Weekend nights)`,
+            isMixed: false,
+          };
+        }
+
+        if (weekdayCount === nightlyBreakdown.length) {
+          return {
+            rate: weekdayRate,
+            unitLabel: `₱${weekdayRate.toLocaleString()} / extra pax / night`,
+            dayDesc: 'Sunday to Monday rate (₱300)',
+            fullLabel: `₱${weekdayRate.toLocaleString()} / night (${weekdayCount} Weekday nights)`,
+            isMixed: false,
+          };
+        }
+
+        const totalPerPax = nightlyBreakdown.reduce((sum, n) => sum + (n.isWeekend ? weekendRate : weekdayRate), 0);
+        return {
+          rate: totalPerPax,
+          unitLabel: `₱${weekdayRate.toLocaleString()} (Sun–Mon) & ₱${weekendRate.toLocaleString()} (Fri–Sat)`,
+          dayDesc: `${weekdayCount}x Sun–Thu (@₱${weekdayRate.toLocaleString()}) + ${weekendCount}x Fri–Sat (@₱${weekendRate.toLocaleString()})`,
+          fullLabel: `₱${totalPerPax.toLocaleString()} per pax (${nightlyBreakdown.length} nights: ${weekdayCount}x ₱${weekdayRate.toLocaleString()} + ${weekendCount}x ₱${weekendRate.toLocaleString()})`,
+          isMixed: true,
+        };
+      }
+
+      // If nightlyBreakdown is empty, parse checkInDate directly
+      const parts = checkInDate.split('-').map(Number);
+      const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(checkInDate);
+      const isW = d.getDay() === 5 || d.getDay() === 6;
+      const rate = isW ? weekendRate : weekdayRate;
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+      return {
+        rate,
+        unitLabel: `₱${rate.toLocaleString()} / extra pax / night`,
+        dayDesc: isW ? `${dayName} (Friday to Saturday rate ₱350)` : `${dayName} (Sunday to Monday rate ₱300)`,
+        fullLabel: `₱${rate.toLocaleString()} / night (${dayName})`,
+        isMixed: false,
+      };
+    } else {
+      // Hourly stay
+      const parts = hourlyDate.split('-').map(Number);
+      const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(hourlyDate);
+      const isW = d.getDay() === 5 || d.getDay() === 6;
+      const rate = isW ? weekendRate : weekdayRate;
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+      return {
+        rate,
+        unitLabel: `₱${rate.toLocaleString()} / extra pax`,
+        dayDesc: isW ? `${dayName} (Friday to Saturday rate ₱350)` : `${dayName} (Sunday to Monday rate ₱300)`,
+        fullLabel: `₱${rate.toLocaleString()} / pax (${dayName})`,
+        isMixed: false,
+      };
+    }
+  }, [stayType, nightlyBreakdown, checkInDate, hourlyDate]);
+
+  // Dynamic single-pax rate info for Private Villa Extra Child Pax based on calendar date day (Monday to Friday ₱400, Saturday to Sunday ₱500)
+  const extraPaxChildVillaRateInfo = useMemo(() => {
+    const weekdayRate = 400; // Monday to Friday
+    const weekendRate = 500; // Saturday to Sunday
+
+    if (stayType === 'nightly') {
+      if (nightlyBreakdown.length > 0) {
+        const satSunCount = nightlyBreakdown.filter((n) => {
+          const d = new Date(n.dateStr).getDay();
+          return d === 6 || d === 0;
+        }).length;
+        const monFriCount = nightlyBreakdown.length - satSunCount;
+
+        if (satSunCount === nightlyBreakdown.length) {
+          return {
+            rate: weekendRate,
+            unitLabel: `₱${weekendRate.toLocaleString()} / child / night`,
+            dayDesc: 'Saturday to Sunday rate (₱500)',
+            fullLabel: `₱${weekendRate.toLocaleString()} / night (${satSunCount} Weekend nights)`,
+            isMixed: false,
+          };
+        }
+
+        if (monFriCount === nightlyBreakdown.length) {
+          return {
+            rate: weekdayRate,
+            unitLabel: `₱${weekdayRate.toLocaleString()} / child / night`,
+            dayDesc: 'Monday to Friday rate (₱400)',
+            fullLabel: `₱${weekdayRate.toLocaleString()} / night (${monFriCount} Mon–Fri nights)`,
+            isMixed: false,
+          };
+        }
+
+        const totalPerChild = nightlyBreakdown.reduce((sum, n) => {
+          const d = new Date(n.dateStr).getDay();
+          const isSatSun = d === 6 || d === 0;
+          return sum + (isSatSun ? weekendRate : weekdayRate);
+        }, 0);
+
+        return {
+          rate: totalPerChild,
+          unitLabel: `₱${weekdayRate.toLocaleString()} (Mon–Fri) & ₱${weekendRate.toLocaleString()} (Sat–Sun)`,
+          dayDesc: `${monFriCount}x Mon–Fri (@₱${weekdayRate.toLocaleString()}) + ${satSunCount}x Sat–Sun (@₱${weekendRate.toLocaleString()})`,
+          fullLabel: `₱${totalPerChild.toLocaleString()} per child (${nightlyBreakdown.length} nights: ${monFriCount}x ₱${weekdayRate.toLocaleString()} + ${satSunCount}x ₱${weekendRate.toLocaleString()})`,
+          isMixed: true,
+        };
+      }
+
+      const parts = checkInDate.split('-').map(Number);
+      const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(checkInDate);
+      const isSatSun = d.getDay() === 6 || d.getDay() === 0;
+      const rate = isSatSun ? weekendRate : weekdayRate;
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+      return {
+        rate,
+        unitLabel: `₱${rate.toLocaleString()} / child / night`,
+        dayDesc: isSatSun ? `${dayName} (Saturday to Sunday rate ₱500)` : `${dayName} (Monday to Friday rate ₱400)`,
+        fullLabel: `₱${rate.toLocaleString()} / night (${dayName})`,
+        isMixed: false,
+      };
+    } else {
+      const parts = hourlyDate.split('-').map(Number);
+      const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(hourlyDate);
+      const isSatSun = d.getDay() === 6 || d.getDay() === 0;
+      const rate = isSatSun ? weekendRate : weekdayRate;
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+      return {
+        rate,
+        unitLabel: `₱${rate.toLocaleString()} / child`,
+        dayDesc: isSatSun ? `${dayName} (Saturday to Sunday rate ₱500)` : `${dayName} (Monday to Friday rate ₱400)`,
+        fullLabel: `₱${rate.toLocaleString()} / child (${dayName})`,
+        isMixed: false,
+      };
+    }
+  }, [stayType, nightlyBreakdown, checkInDate, hourlyDate]);
+
+  // Addon cost calculation helper function (handles Sunday to Monday ₱300, Friday to Saturday ₱350, Private Villa Adult ₱500, Private Villa Child ₱400/₱500, Infant ₱0)
+  const getAddonCost = useCallback(
+    (addon: BookingAddonItem, qty: number) => {
+      if (qty <= 0) return 0;
+      if (addon.id === 'extra_pax_all_rooms') {
+        const weekdayRate = 300;
+        const weekendRate = 350;
+        if (stayType === 'nightly') {
+          if (nightlyBreakdown.length > 0) {
+            return nightlyBreakdown.reduce((sum, item) => {
+              const dayRate = item.isWeekend ? weekendRate : weekdayRate;
+              return sum + dayRate * qty;
+            }, 0);
+          }
+          const parts = checkInDate.split('-').map(Number);
+          const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(checkInDate);
+          const isW = d.getDay() === 5 || d.getDay() === 6;
+          return (isW ? weekendRate : weekdayRate) * qty * calculatedNights;
+        } else {
+          const parts = hourlyDate.split('-').map(Number);
+          const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(hourlyDate);
+          const isW = d.getDay() === 5 || d.getDay() === 6;
+          return (isW ? weekendRate : weekdayRate) * qty;
+        }
+      }
+      if (addon.id === 'extra_pax_adult_villa') {
+        // Monday to Friday: ₱500 / night, Saturday to Sunday: ₱500 / night
+        const adultRate = 500;
+        if (stayType === 'nightly') {
+          return adultRate * qty * calculatedNights;
+        } else {
+          return adultRate * qty;
+        }
+      }
+      if (addon.id === 'extra_pax_child_villa') {
+        // Monday to Friday: ₱400 / night, Saturday to Sunday: ₱500 / night
+        const weekdayRate = 400;
+        const weekendRate = 500;
+        if (stayType === 'nightly') {
+          if (nightlyBreakdown.length > 0) {
+            return nightlyBreakdown.reduce((sum, item) => {
+              const d = new Date(item.dateStr).getDay();
+              const isSatSun = d === 6 || d === 0;
+              const childRate = isSatSun ? weekendRate : weekdayRate;
+              return sum + childRate * qty;
+            }, 0);
+          }
+          const parts = checkInDate.split('-').map(Number);
+          const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(checkInDate);
+          const isSatSun = d.getDay() === 6 || d.getDay() === 0;
+          return (isSatSun ? weekendRate : weekdayRate) * qty * calculatedNights;
+        } else {
+          const parts = hourlyDate.split('-').map(Number);
+          const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(hourlyDate);
+          const isSatSun = d.getDay() === 6 || d.getDay() === 0;
+          return (isSatSun ? weekendRate : weekdayRate) * qty;
+        }
+      }
+      if (addon.id === 'extra_pax_infant_villa') {
+        // 3 yrs & below free of charge (sneak-in)
+        return 0;
+      }
+      if (addon.isPerNight && stayType === 'nightly') {
+        return addon.price * qty * calculatedNights;
+      }
+      return addon.price * qty;
+    },
+    [stayType, calculatedNights, nightlyBreakdown, checkInDate, hourlyDate]
+  );
+
+  // Add-ons total cost computation
+  const addonsTotal = useMemo(() => {
+    let sum = 0;
+    availableAddons.forEach((addon) => {
+      const qty = addonQuantities[addon.id] || 0;
+      if (qty > 0) {
+        sum += getAddonCost(addon, qty);
+      }
+    });
+    return sum;
+  }, [availableAddons, addonQuantities, getAddonCost]);
+
+  // Grand Total & Payment Split
+  const grandTotal = useMemo(() => {
+    const total = baseStayRate + addonsTotal;
+    return total > 0 ? total : 0;
+  }, [baseStayRate, addonsTotal]);
+
+  const amountPayableNow = useMemo(() => {
+    if (paymentOption === 'full') {
+      return grandTotal;
+    } else {
+      // 40% partial downpayment
+      return Math.round(grandTotal * 0.4);
+    }
+  }, [paymentOption, grandTotal]);
+
+  const remainingBalance = useMemo(() => {
+    return Math.max(0, grandTotal - amountPayableNow);
+  }, [grandTotal, amountPayableNow]);
+
+  // Addon adjust helper
+  const handleAdjustAddon = (addonId: string, delta: number) => {
+    setAddonQuantities((prev) => {
+      const current = prev[addonId] || 0;
+      const next = Math.max(0, current + delta);
+      return { ...prev, [addonId]: next };
+    });
+  };
+
+  // Max extra pax allowed per room according to specifications:
+  // Eligible Rooms (Max to add: 1 extra pax): Room 0, 1, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16
+  // Eligible Rooms (Max to add: 2 extra pax): Room 11, 2, 3
+  // Private Villa (Max to add: 10 extra pax): Private Villa
+  // Other Rooms: Max to add: 0 (strictly limited to standard capacity)
+  const getRoomMaxExtraPax = (room: RoomUnit): number => {
+    if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+      return 10;
+    }
+    const eligible1 = ['0', '1', '4', '5', '6', '7', '8', '9', '10', '12', '13', '14', '15', '16'];
+    const eligible2 = ['11', '2', '3'];
+    const match = (room.roomNumber || room.title).match(/\d+/);
+    const numStr = match ? match[0] : room.id.replace('room-', '');
+    if (eligible2.includes(numStr)) return 2;
+    if (eligible1.includes(numStr)) return 1;
+    return 0;
+  };
+
+  // Base standard capacity before extra pax
+  const getRoomBaseCapacity = (room: RoomUnit): number => {
+    if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+      return 10;
+    }
+    if (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-7') return 8;
+    if (room.id === 'room-2' || room.id === 'room-3') return 10;
+    if (room.id === 'room-4' || room.id === 'room-5' || room.id === 'room-6') return 7;
+    if (room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16') return 5;
+    if (room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10') return 3;
+    if (room.id === 'room-11') return 2;
+    return room.capacity?.maxGuests || 3;
+  };
+
+  // Max total accommodation including allowable extra pax
+  const getRoomMaxAccommodation = (room: RoomUnit): number => {
+    if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+      return 20; // 10 Standard + 10 Extra Pax
+    }
+    const maxExtra = getRoomMaxExtraPax(room);
+    const baseCap = getRoomBaseCapacity(room);
+    return baseCap + maxExtra;
+  };
+
+  // Set individual pax quantity for a room or villa
+  const handleSetRoomPaxQuantity = (roomId: string, paxQty: number) => {
+    const roomObj = rooms.find((r) => r.id === roomId);
+    if (!roomObj) return;
+
+    const baseCap = getRoomBaseCapacity(roomObj);
+    const maxAllowedExtra = getRoomMaxExtraPax(roomObj);
+    const extraNeeded = Math.max(0, Math.min(paxQty - baseCap, maxAllowedExtra));
+
+    setRoomPaxQuantityMap((prev) => ({ ...prev, [roomId]: paxQty }));
+
+    setRoomExtraPaxMap((prev) => {
+      const updated = { ...prev };
+      if (extraNeeded > 0) {
+        updated[roomId] = extraNeeded;
+      } else {
+        delete updated[roomId];
+      }
+
+      const activeRoomIds = !selectedRoomIds.includes(roomId)
+        ? [...selectedRoomIds, roomId]
+        : selectedRoomIds;
+
+      if (!selectedRoomIds.includes(roomId)) {
+        setSelectedRoomIds(activeRoomIds);
+        setSelectedRoomNumberFilter(roomId);
+      }
+
+      const totalExtraPax = Object.entries(updated).reduce((sum, [id, count]) => {
+        return activeRoomIds.includes(id) ? sum + count : sum;
+      }, 0);
+
+      setAddonQuantities((prevAddons) => ({
+        ...prevAddons,
+        extra_pax_all_rooms: totalExtraPax,
+      }));
+
+      return updated;
+    });
+  };
+
+  // Toggle or cycle extra pax for an individual room (capped by max to add: 1 or 2)
+  const handleToggleRoomExtraPax = (roomId: string, maxAllowed: number = 1) => {
+    const roomObj = rooms.find((r) => r.id === roomId);
+    const baseCap = roomObj ? getRoomBaseCapacity(roomObj) : 2;
+
+    setRoomExtraPaxMap((prev) => {
+      const current = prev[roomId] || 0;
+      // Cycle: 0 -> 1 -> (if maxAllowed >= 2) 2 -> ... -> 0
+      const nextVal = current >= maxAllowed ? 0 : current + 1;
+      const updated = { ...prev };
+      if (nextVal > 0) {
+        updated[roomId] = nextVal;
+      } else {
+        delete updated[roomId];
+      }
+
+      // Synchronize roomPaxQuantityMap
+      setRoomPaxQuantityMap((prevPax) => ({
+        ...prevPax,
+        [roomId]: baseCap + nextVal,
+      }));
+
+      const activeRoomIds = nextVal > 0 && !selectedRoomIds.includes(roomId)
+        ? [...selectedRoomIds, roomId]
+        : selectedRoomIds;
+
+      if (nextVal > 0 && !selectedRoomIds.includes(roomId)) {
+        setSelectedRoomIds(activeRoomIds);
+        setSelectedRoomNumberFilter(roomId);
+      }
+
+      const totalExtraPax = Object.entries(updated).reduce((sum, [id, count]) => {
+        return activeRoomIds.includes(id) ? sum + count : sum;
+      }, 0);
+
+      setAddonQuantities((prevAddons) => ({
+        ...prevAddons,
+        extra_pax_all_rooms: totalExtraPax,
+      }));
+
+      return updated;
+    });
+  };
+
+  // Copy to clipboard helper
+  const handleCopy = (text: string, fieldKey: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldKey);
+    setTimeout(() => {
+      setCopiedField(null);
+    }, 2000);
+  };
+
+  // Mandatory Slip File Upload Handler
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSlipUploadError('');
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      
+      // Validate file size (< 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        setSlipUploadError('Payment slip file exceeds 10MB limit. Please upload a smaller image.');
+        return;
+      }
+
+      setSlipFile(file);
+      const preview = URL.createObjectURL(file);
+      setSlipPreviewUrl(preview);
+      
+      if (formErrors.paymentSlip) {
+        setFormErrors((prev) => {
+          const next = { ...prev };
+          delete next.paymentSlip;
+          return next;
+        });
+      }
+    }
+  };
+
+  const handleRemoveSlip = () => {
+    setSlipFile(null);
+    if (slipPreviewUrl) {
+      URL.revokeObjectURL(slipPreviewUrl);
+      setSlipPreviewUrl(null);
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Calendar Day Status Logic
+  const getDateClassification = (dateStr: string) => {
+    // 1. Past dates
+    if (dateStr < todayStr) {
+      return {
+        type: 'past',
+        bg: 'bg-gray-200 text-gray-400 cursor-not-allowed line-through',
+        badge: 'Past',
+      };
+    }
+
+    // 2. Currently Selected Date(s) -> Green
+    if (stayType === 'nightly') {
+      if (dateStr === checkInDate || dateStr === checkOutDate) {
+        return {
+          type: 'selected',
+          bg: 'bg-emerald-600 text-white font-black ring-2 ring-emerald-300 shadow-md',
+          badge: dateStr === checkInDate ? 'Check-in' : 'Check-out',
+        };
+      }
+      if (checkInDate && checkOutDate && dateStr > checkInDate && dateStr < checkOutDate) {
+        return {
+          type: 'selected_range',
+          bg: 'bg-emerald-500 text-white font-bold ring-1 ring-emerald-300',
+          badge: 'Stay',
+        };
+      }
+    } else {
+      if (dateStr === hourlyDate) {
+        return {
+          type: 'selected',
+          bg: 'bg-emerald-600 text-white font-black ring-2 ring-emerald-300 shadow-md',
+          badge: 'Selected',
+        };
+      }
+    }
+
+    // 3. Booked Date -> Red (Few Rooms Available)
+    if (bookedDatesSet.has(dateStr)) {
+      return {
+        type: 'booked',
+        bg: 'bg-red-500 text-white font-bold shadow-xs',
+        badge: 'Few Rooms Available',
+      };
+    }
+
+    // 4. Otherwise -> Orange (Available)
+    return {
+      type: 'available',
+      bg: 'bg-orange-500 text-white font-bold hover:bg-orange-600 shadow-xs cursor-pointer',
+      badge: 'Available',
+    };
+  };
+
+  // Calendar Date Click Handler
+  const handleCalendarDateClick = (dateStr: string) => {
+    if (dateStr < todayStr) return;
+
+    if (bookedDatesSet.has(dateStr)) {
+      setCalendarNotice(`Date ${dateStr} has few rooms available for ${selectedRoom ? selectedRoom.title : 'the chosen unit'}. Please pick an orange (available) date.`);
+      setTimeout(() => setCalendarNotice(''), 4500);
+      return;
+    }
+
+    setCalendarNotice('');
+
+    if (stayType === 'nightly') {
+      if (checkInDate && checkOutDate) {
+        // Start fresh range
+        setCheckInDate(dateStr);
+        const nextDay = new Date(dateStr);
+        nextDay.setDate(nextDay.getDate() + 1);
+        setCheckOutDate(nextDay.toISOString().split('T')[0]);
+      } else if (checkInDate && !checkOutDate) {
+        if (dateStr > checkInDate) {
+          setCheckOutDate(dateStr);
+        } else {
+          setCheckInDate(dateStr);
+          const nextDay = new Date(dateStr);
+          nextDay.setDate(nextDay.getDate() + 1);
+          setCheckOutDate(nextDay.toISOString().split('T')[0]);
+        }
+      } else {
+        setCheckInDate(dateStr);
+        const nextDay = new Date(dateStr);
+        nextDay.setDate(nextDay.getDate() + 1);
+        setCheckOutDate(nextDay.toISOString().split('T')[0]);
+      }
+    } else {
+      setHourlyDate(dateStr);
+    }
+  };
+
+  // Calendar Month Navigation
+  const handlePrevMonth = () => {
+    setCalendarViewDate((prev) => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() - 1);
+      return d;
+    });
+  };
+
+  const handleNextMonth = () => {
+    setCalendarViewDate((prev) => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() + 1);
+      return d;
+    });
+  };
+
+  // Generate calendar days for current month view
+  const calendarDays = useMemo(() => {
+    const year = calendarViewDate.getFullYear();
+    const month = calendarViewDate.getMonth();
+    const firstDayIndex = new Date(year, month, 1).getDay(); // 0 is Sunday
+    const totalDays = new Date(year, month + 1, 0).getDate();
+
+    const padding = Array.from({ length: firstDayIndex }, (_, i) => null);
+    const days = Array.from({ length: totalDays }, (_, i) => {
+      const dayNum = i + 1;
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+      return { dayNum, dateStr };
+    });
+
+    return { padding, days, year, month };
+  }, [calendarViewDate]);
+
+  const monthLabel = useMemo(() => {
+    return calendarViewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }, [calendarViewDate]);
+
+  // Handle Form Submission
+  const handleSubmitBooking = (e: React.FormEvent) => {
+    e.preventDefault();
+    const errors: { [key: string]: string } = {};
+
+    if (!guestName.trim()) {
+      errors.guestName = 'Please enter guest full name';
+    }
+
+    if (!guestPhone.trim()) {
+      errors.guestPhone = 'Compulsory: Active mobile phone number is required for SMS check-in details';
+    } else if (guestPhone.trim().length < 7) {
+      errors.guestPhone = 'Please enter a valid phone number (e.g. 0917 568 1408)';
+    }
+
+    if (selectedRoomIds.length === 0) {
+      errors.room = 'Please select at least one accommodation unit to proceed with your booking.';
+    }
+
+    // MANDATORY SLIP VALIDATION
+    if (!slipFile && !slipPreviewUrl) {
+      errors.paymentSlip = 'MANDATORY: You must upload a screenshot or photo of your payment deposit slip before submitting.';
+      setSlipUploadError('Payment slip is required to lock this reservation.');
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      window.scrollTo({ top: 300, behavior: 'smooth' });
+      return;
+    }
+
+    setFormErrors({});
+
+    const formattedRoomTitle = selectedRoomsGrouped.length > 0
+      ? selectedRoomsGrouped
+          .map((g) => `${g.count > 1 ? `${g.count}x ` : ""}${g.category} (${g.roomNumbers.join(", ")})`)
+          .join(" + ")
+      : selectedRoom ? selectedRoom.title : 'Accommodation Unit';
+
+    // Build confirmed booking record
+    const newBooking: BookingRecord = {
+      id: `DV-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      createdAt: new Date().toISOString(),
+      roomId: selectedRoomIds.join(","),
+      roomTitle: formattedRoomTitle,
+      stayType: stayType,
+      checkInDate: stayType === 'nightly' ? checkInDate : undefined,
+      checkOutDate: stayType === 'nightly' ? checkOutDate : undefined,
+      numberOfNights: stayType === 'nightly' ? calculatedNights : undefined,
+      hourlyDate: stayType === 'hourly' ? hourlyDate : undefined,
+      hourlyStartTime: stayType === 'hourly' ? hourlyStartTime : undefined,
+      hourlyDurationHours: stayType === 'hourly' ? hourlyDuration : undefined,
+      adultGuests: adultGuests,
+      childGuests: childGuests,
+      child6to10Guests: child6to10Guests,
+      child1to5Guests: child1to5Guests,
+      addons: availableAddons
+        .filter((addon) => (addonQuantities[addon.id] || 0) > 0)
+        .map((addon) => {
+          const qty = addonQuantities[addon.id];
+          const cost = getAddonCost(addon, qty);
+          return {
+            id: addon.id,
+            name: addon.name,
+            quantity: qty,
+            cost: cost,
+          };
+        }),
+      baseRatePerUnit: Math.round(baseStayRate / (stayType === 'nightly' ? calculatedNights : 1)),
+      baseStayTotal: baseStayRate,
+      addonsTotal: addonsTotal,
+      discountAmount: 0,
+      grandTotal: grandTotal,
+      paymentOption: paymentOption,
+      amountPaidNow: amountPayableNow,
+      remainingBalance: remainingBalance,
+      paymentMethod: paymentMethod,
+      paymentSlipUrl: slipPreviewUrl || undefined,
+      paymentSlipFileName: slipFile?.name || 'payment_slip.jpg',
+      guestName: guestName.trim(),
+      guestPhone: guestPhone.trim(),
+      guestEmail: guestEmail.trim() || undefined,
+      guestUsername: guestUsername.trim() || undefined,
+      guestPassword: guestPassword.trim() || undefined,
+      status: 'Pending Slip Review',
+      staffNotes: `Online reservation for ${formattedRoomTitle}. Occupancy: ${totalPax} pax. Payment: ${paymentOption === 'partial_40' ? '40% Partial Downpayment' : '100% Full Payment'}. Slip attached.`,
+    };
+
+    // Automatic Guest Account Registration upon reservation
+    try {
+      registerGuestAccount({
+        username: guestUsername.trim() || (guestPhone.trim() ? `guest_${guestPhone.replace(/[^0-9]/g, "").slice(-4)}` : `guest_${Date.now().toString().slice(-4)}`),
+        password: guestPassword.trim() || undefined,
+        fullName: guestName.trim(),
+        phone: guestPhone.trim(),
+        email: guestEmail.trim() || undefined,
+        bookingId: newBooking.id,
+      });
+
+      const storedIds: string[] = JSON.parse(localStorage.getItem("diversion_vigan_my_booking_ids") || "[]");
+      if (!storedIds.includes(newBooking.id)) {
+        storedIds.unshift(newBooking.id);
+        localStorage.setItem("diversion_vigan_my_booking_ids", JSON.stringify(storedIds));
+      }
+    } catch (e) {
+      console.error("Error storing automatic guest registration:", e);
+    }
+
+    onBookingCreated(newBooking);
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Back Button */}
+      {onBack && (
+        <div>
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[#E6D7C3] bg-white text-xs font-bold text-[#2C1E15] hover:bg-[#F5EBE6] shadow-xs transition-all cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>← Back to Explore Rooms</span>
+          </button>
+        </div>
+      )}
+      
+      {/* Header */}
+      <div className="text-center max-w-3xl mx-auto space-y-2">
+        <div className="inline-flex items-center gap-2 bg-[#E6D7C3]/40 border border-[#E6D7C3] px-3.5 py-1 rounded-full text-xs font-bold text-[#2C1E15] uppercase tracking-wider">
+          <VillaLogo size={18} variant="dark" />
+          <span>Real-time Rate Engine</span>
+        </div>
+        <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#2C1E15]">
+          Enjoy Your Stay
+        </h2>
+        <p className="text-sm sm:text-base text-[#786150]">
+          Instant price computation based on guest count and day of week, 40% partial downpayment option, transparent add-ons, and immediate booking voucher generation.
+        </p>
+      </div>
+
+      {/* Main Two-Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        {/* Left Column: Interactive Booking Engine Form */}
+        <div className="lg:col-span-8 space-y-8">
+          
+          <form onSubmit={handleSubmitBooking} className="space-y-8">
+            
+            {/* STEP 2: Stay Type, Schedule & Availability Calendar */}
+            <div className="bg-white rounded-3xl p-6 sm:p-7 border border-[#E6D7C3]/60 shadow-lg space-y-6">
+              <div className="flex items-center justify-between border-b border-[#E6D7C3]/40 pb-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 rounded-full bg-[#2C1E15] text-white font-bold flex items-center justify-center text-sm">
+                    1
+                  </span>
+                  <div>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Stay Type & Availability Calendar</h3>
+                    <p className="text-xs text-[#786150]">Check live room availability calendar and choose your dates</p>
+                  </div>
+                </div>
+              </div>
+
+
+
+              {/* Availability Calendar Section with requested color coding */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-[#FDFBF7] border-2 border-[#E6D7C3] space-y-4">
+                
+                {/* Calendar Header with Legend & Month Controls */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E6D7C3]/50 pb-3">
+                  <div>
+                    <h4 className="font-serif font-bold text-base text-[#2C1E15] flex items-center gap-2">
+                      <CalendarIcon className="w-4 h-4 text-[#2C1E15]" />
+                      <span>Availability Calendar{selectedRoom ? ` — ${selectedRoom.title}` : ''}</span>
+                    </h4>
+                    <p className="text-xs text-[#786150]">
+                      Click an orange date below to set your stay schedule
+                    </p>
+                  </div>
+
+                  {/* Month Navigation */}
+                  <div className="flex items-center gap-2 self-start sm:self-center">
+                    <button
+                      type="button"
+                      onClick={handlePrevMonth}
+                      className="p-1.5 rounded-lg border border-[#E6D7C3] bg-white hover:bg-[#F5EBE6] text-[#2C1E15] transition-colors cursor-pointer"
+                      title="Previous Month"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="font-bold text-xs text-[#2C1E15] px-2 min-w-28 text-center">
+                      {monthLabel}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleNextMonth}
+                      className="p-1.5 rounded-lg border border-[#E6D7C3] bg-white hover:bg-[#F5EBE6] text-[#2C1E15] transition-colors cursor-pointer"
+                      title="Next Month"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Color Legend (Red: Few Rooms Available, Orange: Available, Green: Selected Date) */}
+                <div className="bg-white p-3 rounded-xl border border-[#E6D7C3]/70 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <span className="font-bold text-[#2C1E15] uppercase text-[11px] tracking-wider">
+                    Calendar Legend:
+                  </span>
+                  <div className="flex flex-wrap items-center gap-3 sm:gap-5">
+                    {/* Red Few Rooms Available */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3.5 h-3.5 rounded-md bg-red-500 shadow-xs"></span>
+                      <span className="font-bold text-red-950">Red: Few Rooms Available</span>
+                    </div>
+                    {/* Orange Available */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3.5 h-3.5 rounded-md bg-orange-500 shadow-xs"></span>
+                      <span className="font-bold text-orange-950">Orange: Available</span>
+                    </div>
+                    {/* Green Selected Date */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3.5 h-3.5 rounded-md bg-emerald-600 ring-2 ring-emerald-300 shadow-xs"></span>
+                      <span className="font-bold text-emerald-950">Green: Selected Date</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Notice message if user clicks booked date */}
+                {calendarNotice && (
+                  <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                    <span>{calendarNotice}</span>
+                  </div>
+                )}
+
+                {/* Calendar Grid */}
+                <div className="bg-white p-3 sm:p-4 rounded-xl border border-[#E6D7C3]">
+                  {/* Days of week */}
+                  <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-bold text-[#786150] pb-2 border-b border-[#E6D7C3]/40 mb-2">
+                    <span>Sun</span>
+                    <span>Mon</span>
+                    <span>Tue</span>
+                    <span>Wed</span>
+                    <span>Thu</span>
+                    <span>Fri</span>
+                    <span>Sat</span>
+                  </div>
+
+                  {/* Day cells */}
+                  <div className="grid grid-cols-7 gap-1.5">
+                    {/* Padding empty slots */}
+                    {calendarDays.padding.map((_, idx) => (
+                      <div key={`pad-${idx}`} className="h-10 sm:h-12 rounded-lg bg-gray-50/50"></div>
+                    ))}
+
+                    {/* Month Days */}
+                    {calendarDays.days.map(({ dayNum, dateStr }) => {
+                      const status = getDateClassification(dateStr);
+                      return (
+                        <button
+                          key={dateStr}
+                          type="button"
+                          onClick={() => handleCalendarDateClick(dateStr)}
+                          disabled={status.type === 'past'}
+                          className={`h-10 sm:h-12 rounded-xl text-xs flex flex-col items-center justify-center transition-all cursor-pointer relative ${status.bg}`}
+                          title={`${dateStr}: ${status.badge}`}
+                        >
+                          <span className="text-xs sm:text-sm leading-tight">{dayNum}</span>
+                          <span className="text-[9px] uppercase tracking-tighter opacity-90 hidden sm:block">
+                            {status.badge}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Nightly Schedule Inputs */}
+              {stayType === 'nightly' ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                        Check-in Date (2:00 PM standard)
+                      </label>
+                      <input
+                        type="date"
+                        value={checkInDate}
+                        min={todayStr}
+                        onChange={(e) => setCheckInDate(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium focus:ring-2 focus:ring-[#2C1E15] outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                        Check-out Date (12:00 PM standard)
+                      </label>
+                      <input
+                        type="date"
+                        value={checkOutDate}
+                        min={checkInDate || todayStr}
+                        onChange={(e) => setCheckOutDate(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium focus:ring-2 focus:ring-[#2C1E15] outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-[#F5EBE6] p-3 rounded-xl border border-[#E6D7C3]/60 flex items-center justify-between text-xs text-[#2C1E15]">
+                    <span className="font-semibold">Calculated Duration:</span>
+                    <span className="font-bold bg-white px-3 py-1 rounded-lg border border-[#E6D7C3]">
+                      {calculatedNights} {calculatedNights === 1 ? 'Night' : 'Nights'}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                /* Hourly Schedule Inputs */
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-[#2C1E15] mb-1">Date of Stay</label>
+                      <input
+                        type="date"
+                        value={hourlyDate}
+                        min={todayStr}
+                        onChange={(e) => setHourlyDate(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-[#2C1E15] mb-1">Target Start Time</label>
+                      <input
+                        type="time"
+                        value={hourlyStartTime}
+                        onChange={(e) => setHourlyStartTime(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-[#2C1E15] mb-1">Duration Block</label>
+                      <select
+                        value={hourlyDuration}
+                        onChange={(e) => setHourlyDuration(Number(e.target.value) as 3 | 6 | 12)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-semibold outline-none"
+                      >
+                        <option value={3}>3 Hours Wash-up</option>
+                        <option value={6}>6 Hours Short Stay</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-800 flex items-center justify-between">
+                    <span>Selected Rate for {hourlyDuration} Hours:</span>
+                    <span className="font-bold text-sm">
+                      ₱{(selectedRoom ? (hourlyDuration === 3 
+                        ? selectedRoom.pricing.hourly3hr 
+                        : selectedRoom.pricing.hourly6hr || 800) : (hourlyDuration === 3 ? 500 : 800))?.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+
+
+            </div>
+
+            {/* STEP 1: Select Accommodation Unit (Dropdown Option for all rooms) */}
+            <div className="bg-white rounded-3xl p-6 sm:p-7 border border-[#E6D7C3]/60 shadow-lg space-y-5">
+              <div className="flex items-center justify-between border-b border-[#E6D7C3]/40 pb-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 rounded-full bg-[#2C1E15] text-white font-bold flex items-center justify-center text-sm">
+                    2
+                  </span>
+                  <div>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Select Accommodation Unit</h3>
+                    <p className="text-xs text-[#786150]">Choose your preferred room from the dropdown menu</p>
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+                  {selectedRoom ? selectedRoom.category : 'No Unit Selected'}
+                </span>
+              </div>
+
+              {/* Room Selection Dropdown */}
+              <div className="space-y-4">
+                                <div>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+                    <div>
+                      <label className="block text-xs font-bold text-[#2C1E15] uppercase tracking-wider">
+                        Accommodation Unit (All Rooms) — Multiple Choices Allowed
+                      </label>
+                      <p className="text-[11px] text-[#786150]">
+                        Click or tap any room box below to select multiple accommodation units
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRoomIds(rooms.map((r) => r.id))}
+                        className="text-[11px] font-bold text-amber-900 bg-amber-100/70 hover:bg-amber-200/80 px-2.5 py-1 rounded-lg border border-amber-300/60 transition-colors cursor-pointer"
+                      >
+                        Select All ({rooms.length})
+                      </button>
+                      {selectedRoomIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRoomIds([]);
+                            setSelectedRoomNumberFilter('');
+                            setRoomExtraPaxMap({});
+                            setRoomPaxQuantityMap({});
+                            setAddonQuantities((prev) => ({
+                              ...prev,
+                              extra_pax_all_rooms: 0,
+                            }));
+                          }}
+                          className="text-[11px] font-bold text-[#786150] hover:text-[#2C1E15] bg-stone-100 hover:bg-stone-200 px-2.5 py-1 rounded-lg border border-stone-300/60 transition-colors cursor-pointer"
+                        >
+                          Clear Selection
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Multiple Choice Interactive Room Number Grid View */}
+                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-2 lg:grid-cols-2 gap-2 mb-3 max-h-80 overflow-y-auto p-2 bg-[#FAF7F2] rounded-2xl border border-[#E6D7C3]/80">
+                    {rooms.map((room) => {
+                      const isSelected = selectedRoomIds.includes(room.id);
+                      const roomUnitName = room.roomNumber || room.title.split("–")[0].trim();
+                      const capText = (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-7')
+                        ? '8 Pax'
+                        : (room.id === 'room-2' || room.id === 'room-3')
+                        ? '10 Pax'
+                        : (room.id === 'room-4' || room.id === 'room-5' || room.id === 'room-6')
+                        ? '7 Pax'
+                        : (room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10')
+                        ? (room.capacity?.recommended || '3 Pax')
+                        : (room.id === 'room-11')
+                        ? '2 Pax'
+                        : (room.capacity?.recommended || `${room.capacity?.maxGuests || 3} Pax`);
+                      const maxExtraPax = getRoomMaxExtraPax(room);
+                      const baseCap = getRoomBaseCapacity(room);
+                      const maxAcc = getRoomMaxAccommodation(room);
+                      const isEligibleForExtraPax = maxExtraPax > 0;
+                      const currentRoomExtraPax = roomExtraPaxMap[room.id] || 0;
+                      const currentPaxQuantity = roomPaxQuantityMap[room.id] || (currentRoomExtraPax > 0 ? baseCap + currentRoomExtraPax : baseCap);
+
+                      const toggleRoomSelection = () => {
+                        if (isSelected) {
+                          const remainingIds = selectedRoomIds.filter((id) => id !== room.id);
+                          setSelectedRoomIds(remainingIds);
+                          if (selectedRoomNumberFilter === room.id) {
+                            setSelectedRoomNumberFilter('');
+                          }
+                          if (roomExtraPaxMap[room.id]) {
+                            setRoomExtraPaxMap((prev) => {
+                              const updated = { ...prev };
+                              delete updated[room.id];
+                              return updated;
+                            });
+                          }
+                        } else {
+                          setSelectedRoomIds([...selectedRoomIds, room.id]);
+                          setSelectedRoomNumberFilter(room.id);
+                        }
+                      };
+
+                      return (
+                        <div
+                          key={`unit-choice-${room.id}`}
+                          role="button"
+                          tabIndex={0}
+                          onClick={toggleRoomSelection}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              toggleRoomSelection();
+                            }
+                          }}
+                          className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between gap-2 select-none shadow-2xs ${
+                            isSelected
+                              ? "bg-[#2C1E15] text-white border-[#2C1E15] shadow-xs ring-2 ring-amber-500/40"
+                              : "bg-white text-[#2C1E15] border-[#E6D7C3] hover:border-amber-400 hover:bg-[#FDFBF7]"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2 min-w-0">
+                            <span
+                              className={`w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${
+                                isSelected
+                                  ? "bg-amber-400 text-[#2C1E15]"
+                                  : "border border-[#C8B29E] bg-[#FDFBF7]"
+                              }`}
+                            >
+                              {isSelected ? "✓" : ""}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5 justify-between">
+                                <span className="font-bold text-xs sm:text-sm truncate">{roomUnitName}</span>
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                                  isSelected ? "bg-amber-900/60 text-amber-200 border border-amber-500/30" : "bg-amber-50 text-amber-900 border border-amber-200"
+                                }`}>
+                                  {room.category}
+                                </span>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-1 mt-1">
+                                <span className={`text-[10px] font-semibold ${isSelected ? "text-stone-300" : "text-[#786150]"}`}>
+                                  {room.id === 'private-villa-pool'
+                                    ? 'good for 10 Pax'
+                                    : (room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16')
+                                    ? 'good for 4 Pax'
+                                    : (room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10')
+                                    ? 'Good for 3 Pax'
+                                    : (room.id === 'room-11')
+                                    ? 'Max 2 Pax (Good for 2)'
+                                    : `Good for ${capText.replace(/^(good for|Good for)\s*/i, '')}`}
+                                </span>
+
+                                {/* Feature: Extra Pax with Max to add according to specified data */}
+                                {maxExtraPax === 1 ? (
+                                  <span
+                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-0.5 transition-all ${
+                                      currentRoomExtraPax > 0
+                                        ? isSelected
+                                          ? "bg-amber-400 text-[#2C1E15]"
+                                          : "bg-emerald-600 text-white"
+                                        : isSelected
+                                        ? "bg-amber-950/80 text-amber-200 border border-amber-400/40"
+                                        : "bg-amber-100/80 text-amber-900 border border-amber-300/80"
+                                    }`}
+                                  >
+                                    <span>{currentRoomExtraPax > 0 ? "✓ +1 Extra" : "+1 Extra"}</span>
+                                    <span className="opacity-80 font-normal text-[8.5px]">(Max 1)</span>
+                                  </span>
+                                ) : maxExtraPax === 2 ? (
+                                  <span
+                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-0.5 transition-all ${
+                                      currentRoomExtraPax > 0
+                                        ? isSelected
+                                          ? "bg-amber-400 text-[#2C1E15]"
+                                          : "bg-emerald-600 text-white"
+                                        : isSelected
+                                        ? "bg-purple-950/80 text-purple-200 border border-purple-400/40"
+                                        : "bg-purple-100/80 text-purple-900 border border-purple-300/80"
+                                    }`}
+                                  >
+                                    <span>{currentRoomExtraPax > 0 ? `✓ +${currentRoomExtraPax} Extra` : "+2 Extra"}</span>
+                                    <span className="opacity-80 font-normal text-[8.5px]">(Max 2)</span>
+                                  </span>
+                                ) : maxExtraPax === 10 ? (
+                                  <span
+                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-0.5 transition-all ${
+                                      currentRoomExtraPax > 0
+                                        ? isSelected
+                                          ? "bg-amber-400 text-[#2C1E15]"
+                                          : "bg-emerald-600 text-white"
+                                        : isSelected
+                                        ? "bg-amber-950/80 text-amber-200 border border-amber-400/40"
+                                        : "bg-amber-100/80 text-amber-900 border border-amber-300/80"
+                                    }`}
+                                  >
+                                    <span>{currentRoomExtraPax > 0 ? `✓ +${currentRoomExtraPax} Extra` : "+1 Extra"}</span>
+                                    <span className="opacity-80 font-normal text-[8.5px]">(Max 10)</span>
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Card Footer: Interactive Controls & Price */}
+                          <div className="pt-2 border-t border-[#E6D7C3]/50 flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                              {/* Pax Quantity Option Depending on Max Accommodation */}
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-lg border text-xs font-semibold transition-all ${
+                                  isSelected
+                                    ? "bg-amber-950/70 border-amber-400/50 text-amber-100"
+                                    : "bg-[#FAF7F2] border-[#E6D7C3] hover:border-amber-400 text-[#2C1E15]"
+                                }`}
+                                title={`Select Pax Quantity for ${roomUnitName} (Max Accommodation: ${maxAcc} Pax)`}
+                              >
+                                <Users className={`w-3 h-3 ${isSelected ? "text-amber-300" : "text-amber-800"} shrink-0`} />
+                                <span className={`text-[9.5px] font-bold ${isSelected ? "text-amber-200" : "text-[#786150]"} uppercase shrink-0`}>
+                                  Pax:
+                                </span>
+                                <select
+                                  value={currentPaxQuantity}
+                                  onChange={(e) => {
+                                    const selectedPax = Number(e.target.value);
+                                    handleSetRoomPaxQuantity(room.id, selectedPax);
+                                  }}
+                                  className={`rounded px-1 py-0.5 text-[10.5px] font-bold outline-none cursor-pointer border ${
+                                    isSelected
+                                      ? "bg-[#2C1E15] text-amber-200 border-amber-500/40 focus:ring-1 focus:ring-amber-400"
+                                      : "bg-white text-[#2C1E15] border-[#E6D7C3] focus:ring-1 focus:ring-amber-500"
+                                  }`}
+                                >
+                                  {Array.from({ length: maxAcc }, (_, i) => i + 1).map((paxNum) => {
+                                    const isExtra = paxNum > baseCap;
+                                    return (
+                                      <option key={paxNum} value={paxNum} className="bg-white text-[#2C1E15]">
+                                        {paxNum} Pax
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              </div>
+
+                              {isEligibleForExtraPax && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleRoomExtraPax(room.id, maxExtraPax);
+                                  }}
+                                  className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded-lg border transition-all cursor-pointer flex items-center gap-0.5 ${
+                                    currentRoomExtraPax > 0
+                                      ? isSelected
+                                        ? "bg-amber-400 text-[#2C1E15] border-amber-500 shadow-xs"
+                                        : "bg-emerald-600 text-white border-emerald-700 shadow-xs"
+                                      : isSelected
+                                      ? "bg-white/10 text-amber-200 border-amber-400/40 hover:bg-white/20"
+                                      : "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200"
+                                  }`}
+                                  title={`Add Extra Pax for this room (Max to add: ${maxExtraPax})`}
+                                >
+                                  <span>
+                                    {maxExtraPax === 1
+                                      ? currentRoomExtraPax > 0
+                                        ? "✓ Extra (1/1)"
+                                        : "+ Extra Pax"
+                                      : maxExtraPax === 2
+                                      ? currentRoomExtraPax === 0
+                                        ? "+ Extra Pax"
+                                        : currentRoomExtraPax === 1
+                                        ? "✓ 1 Extra (+2nd)"
+                                        : "✓ Extra (2/2)"
+                                      : currentRoomExtraPax === 0
+                                      ? "+ Extra Pax"
+                                      : currentRoomExtraPax < 10
+                                      ? `✓ +${currentRoomExtraPax} Extra`
+                                      : "✓ Extra (10/10)"}
+                                  </span>
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Price Breakdown */}
+                            <div className="flex items-baseline justify-between pt-1 border-t border-[#E6D7C3]/30">
+                              <div className="flex flex-col min-w-0">
+                                <span className={`text-[9px] font-medium ${isSelected ? "text-stone-300" : "text-[#786150]"}`}>
+                                  {currentPaxQuantity} Pax Rate:
+                                </span>
+                                {(room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10' || room.id === 'room-11' || room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16') && (
+                                  <span className={`text-[8.5px] font-semibold truncate ${isSelected ? "text-amber-200/90" : "text-[#8B6B10]"}`}>
+                                    {room.id === 'room-11'
+                                      ? `${room.weekdayRateDisplay} • ${room.weekendRateDisplay}`
+                                      : `${room.weekdayRateDisplay} (Mon-Thu, Sun) • ${room.weekendRateDisplay} (Fri-Sat)`}
+                                  </span>
+                                )}
+                              </div>
+                              {(() => {
+                                const isW = nightlyBreakdown.length > 0 ? nightlyBreakdown[0].isWeekend : false;
+                                let calculatedRate = room.pricing?.nightly || 1000;
+
+                                if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+                                  const checkDay = nightlyBreakdown.length > 0 ? new Date(nightlyBreakdown[0].dateStr).getDay() : new Date().getDay();
+                                  const isSatSun = checkDay === 6 || checkDay === 0;
+                                  const baseVilla = isSatSun ? 10000 : 8000;
+                                  const extraPax = Math.max(0, currentPaxQuantity - 10);
+                                  calculatedRate = baseVilla + extraPax * 500;
+                                } else if (room.paxRates && room.paxRates.length > 0) {
+                                  const tier = room.paxRates.find((t) => currentPaxQuantity <= t.pax) || room.paxRates[room.paxRates.length - 1];
+                                  calculatedRate = isW ? tier.weekendRate : tier.weekdayRate;
+                                }
+
+                                return (
+                                  <span className={`font-bold text-xs sm:text-sm font-mono ${isSelected ? "text-amber-300" : "text-[#2C1E15]"}`}>
+                                    ₱{calculatedRate.toLocaleString()}<span className="text-[9.5px] font-normal opacity-80">/night</span>
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+
+
+                  {/* Active Selected Rooms Multi-Choice Chips */}
+                  {selectedRooms.length > 1 && (
+                    <div className="mt-3 p-3 bg-amber-50/60 rounded-xl border border-amber-200/80 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-amber-950 flex items-center gap-1.5">
+                          <span>Multiple Units Selected:</span>
+                          <span className="bg-amber-900 text-amber-100 text-[10px] px-2 py-0.5 rounded-full font-extrabold">
+                            {selectedRooms.length} Rooms
+                          </span>
+                        </span>
+                        <span className="text-[11px] text-amber-800 font-medium">
+                          Up to {selectedRooms.reduce((acc, r) => acc + (r.capacity?.maxGuests || 2), 0)} Total Pax
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedRooms.map((r) => {
+                          const hasExtraPax = !!roomExtraPaxMap[r.id];
+                          return (
+                            <span
+                              key={`chip-selected-${r.id}`}
+                              className="inline-flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-amber-300 text-xs font-bold text-[#2C1E15] shadow-2xs"
+                            >
+                              <span>{r.roomNumber || r.title.split("–")[0].trim()}</span>
+                              <span className="text-[10px] text-[#786150] font-normal">({r.category})</span>
+                              {hasExtraPax && (
+                                <span className="text-[9px] bg-amber-100 text-amber-900 px-1.5 py-0.5 rounded font-bold border border-amber-300">
+                                  +1 Extra Pax
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const remainingIds = selectedRoomIds.filter((id) => id !== r.id);
+                                  setSelectedRoomIds(remainingIds);
+                                  if (selectedRoomNumberFilter === r.id) {
+                                    setSelectedRoomNumberFilter('');
+                                  }
+                                  if (roomExtraPaxMap[r.id]) {
+                                    setRoomExtraPaxMap((prev) => {
+                                      const updated = { ...prev };
+                                      delete updated[r.id];
+                                      return updated;
+                                    });
+                                  }
+                                }}
+                                className="text-amber-800 hover:text-red-600 font-bold ml-0.5 cursor-pointer"
+                                title="Remove unit"
+                              >
+                                ✕
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ACCOMMODATION SELECTION SUMMARY */}
+                  <div className="mt-3 p-3.5 bg-[#FAF7F2] rounded-2xl border border-[#E6D7C3] space-y-2.5 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-[#2C1E15] text-amber-300 flex items-center justify-center">
+                          <Building2 className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <h5 className="font-bold text-xs sm:text-sm text-[#2C1E15]">
+                            Accommodation Selection Summary
+                          </h5>
+                          <p className="text-[10.5px] text-[#786150]">
+                            Live summary of your chosen room units and occupancy
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-bold bg-[#2C1E15] text-amber-200 px-2.5 py-1 rounded-full">
+                        {selectedRooms.length} {selectedRooms.length === 1 ? 'Unit' : 'Units'} Selected
+                      </span>
+                    </div>
+
+                    {selectedRooms.length === 0 ? (
+                      <div className="text-xs bg-white p-3 rounded-xl border border-dashed border-[#E6D7C3] text-center text-[#786150]">
+                        No accommodation units selected yet. Tap any room in the grid above to select.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {selectedRooms.map((r, idx) => {
+                            const roomUnitName = r.roomNumber || r.title.split('–')[0].trim();
+                            const baseCap = getRoomBaseCapacity(r);
+                            const maxCap = getRoomMaxAccommodation(r);
+                            const extraPaxCount = roomExtraPaxMap[r.id] || 0;
+                            const assignedPax = roomPaxQuantityMap[r.id] || (extraPaxCount > 0 ? baseCap + extraPaxCount : baseCap);
+
+                            const isW = nightlyBreakdown.length > 0 ? nightlyBreakdown[0].isWeekend : false;
+                            let calculatedRate = r.pricing?.nightly || 1000;
+                            if (r.id === 'private-villa-pool' || (r.roomNumber || r.title).toLowerCase().includes('private villa')) {
+                              const checkDay = nightlyBreakdown.length > 0 ? new Date(nightlyBreakdown[0].dateStr).getDay() : new Date().getDay();
+                              const isSatSun = checkDay === 6 || checkDay === 0;
+                              const baseVilla = isSatSun ? 10000 : 8000;
+                              const extraPax = Math.max(0, assignedPax - 10);
+                              calculatedRate = baseVilla + extraPax * 500;
+                            } else if (r.paxRates && r.paxRates.length > 0) {
+                              const tier = r.paxRates.find((t) => assignedPax <= t.pax) || r.paxRates[r.paxRates.length - 1];
+                              calculatedRate = isW ? tier.weekendRate : tier.weekdayRate;
+                            }
+
+                            return (
+                              <div
+                                key={`accom-summary-card-${r.id}-${idx}`}
+                                className="bg-white p-2.5 rounded-xl border border-[#E6D7C3]/80 flex flex-col justify-between gap-1.5 shadow-2xs"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-900 font-extrabold text-[10px] flex items-center justify-center">
+                                      {idx + 1}
+                                    </span>
+                                    <span className="font-bold text-xs text-[#2C1E15]">{roomUnitName}</span>
+                                  </div>
+                                  <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 font-medium">
+                                    {r.category}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center justify-between text-[11px] text-[#786150] pt-1 border-t border-[#E6D7C3]/40">
+                                  <span className="font-medium">
+                                    Adult Pax: <strong className="text-[#2C1E15]">{assignedPax} Adult Pax</strong>{' '}
+                                    <span className="opacity-75">(Max {maxCap})</span>
+                                    {extraPaxCount > 0 && (
+                                      <span className="ml-1 text-[9px] bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded font-bold">
+                                        +{extraPaxCount} Extra
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="font-bold text-xs text-[#2C1E15] font-mono">
+                                    ₱{calculatedRate.toLocaleString()}<span className="text-[9px] font-normal text-[#786150]">/nt</span>
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Summary Totals Bar */}
+                        <div className="bg-[#2C1E15] text-white p-2.5 rounded-xl flex items-center justify-between flex-wrap gap-2 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-amber-300 font-bold">Total Capacity:</span>
+                            <span className="font-medium text-stone-200">
+                              {selectedRooms.reduce((sum, r) => sum + (roomPaxQuantityMap[r.id] || getRoomBaseCapacity(r)), 0)} Guests
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-stone-300 text-[11px]">Accommodation Rate:</span>
+                            <span className="font-bold font-mono text-sm text-amber-300">
+                              ₱{selectedRooms.reduce((total, r) => {
+                                const isW = nightlyBreakdown.length > 0 ? nightlyBreakdown[0].isWeekend : false;
+                                const assignedPax = roomPaxQuantityMap[r.id] || getRoomBaseCapacity(r);
+                                if (r.id === 'private-villa-pool' || (r.roomNumber || r.title).toLowerCase().includes('private villa')) {
+                                  const checkDay = nightlyBreakdown.length > 0 ? new Date(nightlyBreakdown[0].dateStr).getDay() : new Date().getDay();
+                                  const isSatSun = checkDay === 6 || checkDay === 0;
+                                  const baseVilla = isSatSun ? 10000 : 8000;
+                                  const extraPax = Math.max(0, assignedPax - 10);
+                                  return total + baseVilla + extraPax * 500;
+                                }
+                                if (r.paxRates && r.paxRates.length > 0) {
+                                  const tier = r.paxRates.find((t) => assignedPax <= t.pax) || r.paxRates[r.paxRates.length - 1];
+                                  return total + (isW ? tier.weekendRate : tier.weekdayRate);
+                                }
+                                return total + (r.pricing?.nightly || 1000);
+                              }, 0).toLocaleString()}
+                              <span className="text-[10px] font-normal text-amber-100/80">/night</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {formErrors.room && (
+                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-bold flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      <span>{formErrors.room}</span>
+                    </div>
+                  )}
+                </div>
+
+
+
+                {/* RELAID OUT ADD-ONS SECTION RIGHT BELOW ACCOMMODATION SELECTION */}
+                <div className="pt-4 border-t border-[#E6D7C3]/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-[#B8860B]" />
+                      <h4 className="font-serif font-bold text-base text-[#2C1E15]">Add-Ons</h4>
+                    </div>
+                    <span className="text-[11px] text-[#786150]">Breakfast ₱120 per head, extra pad / mattresses, and travel extras</span>
+                  </div>
+
+                  <div className="divide-y divide-[#E6D7C3]/40 bg-[#FAF7F2] p-4 rounded-2xl border border-[#E6D7C3]/70">
+                    {(() => {
+                      const isOnlyPrivateVillaSelected =
+                        selectedRooms.length > 0 &&
+                        selectedRooms.every(
+                          (r) => r.id === 'private-villa-pool' || (r.roomNumber || r.title).toLowerCase().includes('private villa')
+                        );
+                      const hasPrivateVillaSelected =
+                        selectedRooms.some(
+                          (r) => r.id === 'private-villa-pool' || (r.roomNumber || r.title).toLowerCase().includes('private villa')
+                        );
+                      const hasOnlyStandardRoomsSelected =
+                        selectedRooms.length > 0 && !hasPrivateVillaSelected;
+
+                      const displayedAddons = availableAddons.filter((addon) => {
+                        if (addon.id === 'extra_pax_all_rooms') {
+                          return !isOnlyPrivateVillaSelected;
+                        }
+                        if (
+                          addon.id === 'extra_pax_adult_villa' ||
+                          addon.id === 'extra_pax_child_villa' ||
+                          addon.id === 'extra_pax_infant_villa'
+                        ) {
+                          return !hasOnlyStandardRoomsSelected;
+                        }
+                        return true;
+                      });
+
+                      return displayedAddons.map((addon) => {
+                        const qty = addonQuantities[addon.id] || 0;
+                        const calculatedCost = getAddonCost(addon, qty);
+                        const isExtraPaxAll = addon.id === 'extra_pax_all_rooms';
+                        const isVillaAdult = addon.id === 'extra_pax_adult_villa';
+                        const isVillaChild = addon.id === 'extra_pax_child_villa';
+                        const isVillaInfant = addon.id === 'extra_pax_infant_villa';
+
+                        let badgeText = addon.unitLabel;
+                        let badgeClass = 'bg-[#F5EBE6] text-amber-800';
+                        let descText = addon.description;
+
+                        if (isExtraPaxAll) {
+                          badgeText = extraPaxCalendarRateInfo.unitLabel;
+                          badgeClass = 'bg-amber-100 text-amber-900 border border-amber-300 font-bold';
+                          descText = `Current rate for selected calendar date (${extraPaxCalendarRateInfo.dayDesc}): Sunday to Monday ₱300, Friday to Saturday ₱350.`;
+                        } else if (isVillaAdult) {
+                          badgeText = 'Mon–Fri ₱500 • Sat–Sun ₱500';
+                          badgeClass = 'bg-amber-100 text-amber-950 border border-amber-300 font-bold';
+                          descText = 'Private Villa Extra Pax (Adult): Monday to Friday ₱500 / night, Saturday to Sunday ₱500 / night.';
+                        } else if (isVillaChild) {
+                          badgeText = extraPaxChildVillaRateInfo.unitLabel;
+                          badgeClass = 'bg-amber-100 text-amber-950 border border-amber-300 font-bold';
+                          descText = `Current rate for selected dates (${extraPaxChildVillaRateInfo.dayDesc}): Monday to Friday ₱400 / child, Saturday to Sunday ₱500 / child.`;
+                        } else if (isVillaInfant) {
+                          badgeText = 'FREE (sneak-in)';
+                          badgeClass = 'bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold';
+                          descText = 'Private Villa Extra Pax (3 years old & below): Free of charge (sneak-in) across all days.';
+                        }
+
+                        return (
+                          <div key={`addon-row-${addon.id}`} className="py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 first:pt-0 last:pb-0">
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-sm text-[#2C1E15]">{addon.name}</span>
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full transition-all ${badgeClass}`}>
+                                  {badgeText}
+                                </span>
+                              </div>
+                              <p className="text-xs text-[#786150] max-w-md">
+                                {descText}
+                              </p>
+                              {qty > 0 && (
+                                <div className="text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md inline-block mt-1 border border-amber-200">
+                                  {isExtraPaxAll && (
+                                    <span>Total for Stay: ₱{calculatedCost.toLocaleString()} ({qty} Extra Pax • {extraPaxCalendarRateInfo.fullLabel})</span>
+                                  )}
+                                  {isVillaAdult && (
+                                    <span>Total for Stay: ₱{calculatedCost.toLocaleString()} ({qty} Extra Adult • ₱500/night)</span>
+                                  )}
+                                  {isVillaChild && (
+                                    <span>Total for Stay: ₱{calculatedCost.toLocaleString()} ({qty} Extra Child • {extraPaxChildVillaRateInfo.fullLabel})</span>
+                                  )}
+                                  {isVillaInfant && (
+                                    <span className="text-emerald-800">Free of charge sneak-in ({qty} Infant / Toddler 3 yrs & below)</span>
+                                  )}
+                                  {!isExtraPaxAll && !isVillaAdult && !isVillaChild && !isVillaInfant && (
+                                    <span>Total: ₱{calculatedCost.toLocaleString()} ({qty}x {addon.name})</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Quantity Selector */}
+                            <div className="flex items-center gap-3 self-end sm:self-center">
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustAddon(addon.id, -1)}
+                                disabled={qty === 0}
+                                className="w-8 h-8 rounded-xl bg-white text-[#2C1E15] font-bold flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#E6D7C3] transition-colors cursor-pointer border border-[#E6D7C3]"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="w-6 text-center font-bold text-sm text-[#2C1E15]">{qty}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleAdjustAddon(addon.id, 1)}
+                                className="w-8 h-8 rounded-xl bg-[#2C1E15] text-white font-bold flex items-center justify-center hover:bg-[#523A2A] transition-colors cursor-pointer"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+
+                {/* Selected Room Highlight Summary */}
+                {selectedRoom ? (
+                  <div className="p-4.5 rounded-2xl bg-[#F5EBE6] border border-[#E6D7C3] space-y-3.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-bold text-[#2C1E15] uppercase tracking-wide">
+                            {selectedRooms.length > 1
+                              ? `${selectedRooms.length} Units: ${selectedRooms.map((r) => r.roomNumber || r.title.split("–")[0].trim()).join(", ")}`
+                              : selectedRoom.title}
+                          </span>
+                          {selectedRooms.some((r) => r.hasPool) && (
+                            <span className="bg-[#FAF7F2] text-[#2C1E15] text-[10px] font-bold px-2 py-0.5 rounded-full border border-[#D4AF37]/50 flex items-center gap-1 shadow-xs">
+                              <Waves className="w-3 h-3 text-[#D4AF37]" />
+                              <span>With Swimming Pool</span>
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-[#786150]">
+                          {selectedRooms.length > 1
+                            ? `Combined capacity: Up to ${selectedRooms.reduce((acc, r) => acc + (r.capacity?.maxGuests || 2), 0)} Pax • ${selectedRooms.reduce((acc, r) => acc + r.sizeSqM, 0)} sq.m. total`
+                            : `${selectedRoom.beds} • ${selectedRoom.capacity.recommended} • ${selectedRoom.sizeSqM} sq.m.`}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        {selectedRooms.length > 1 ? (
+                          <div className="bg-[#2C1E15] text-amber-200 px-3 py-1.5 rounded-xl border border-[#2C1E15] font-bold text-xs">
+                            {selectedRooms.length} Accommodation Units Booked
+                          </div>
+                        ) : (
+                          <>
+                            <div className="bg-white px-3 py-1.5 rounded-xl border border-[#E6D7C3]">
+                              <span className="text-[#786150]">Sun–Thu: </span>
+                              <span className="font-bold text-[#2C1E15]">{formatRateDisplay(selectedRoom).weekdayStr}</span>
+                            </div>
+                            <div className="bg-white px-3 py-1.5 rounded-xl border border-[#E6D7C3]">
+                              <span className="text-[#786150]">Fri–Sat: </span>
+                              <span className="font-bold text-amber-800">{formatRateDisplay(selectedRoom).weekendStr}</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Standard Amenities List */}
+                    <div className="pt-2 border-t border-[#E6D7C3]/50">
+                      <span className="text-[11px] font-bold text-[#523A2A] uppercase tracking-wider block mb-1.5">
+                        Included Room & Property Amenities:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedRoom.amenities.map((amenity, idx) => (
+                          <span
+                            key={`amenity-${idx}`}
+                            className={`text-[11px] font-medium px-2.5 py-1 rounded-lg border flex items-center gap-1 ${
+                              amenity.includes('Swimming Pool')
+                                ? 'bg-[#FAF7F2] border-[#D4AF37] text-[#2C1E15] font-bold shadow-xs'
+                                : 'bg-white border-[#E6D7C3]/80 text-[#2C1E15]'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3 h-3 text-[#8B6B10] shrink-0" />
+                            <span>{amenity}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Official Pax Rate Sheet Table for Selected Room */}
+                    {selectedRoom.paxRates && selectedRoom.paxRates.length > 0 && (
+                      <div className="pt-2 border-t border-[#E6D7C3]/50">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[11px] font-bold text-[#523A2A] uppercase tracking-wider">
+                            Rate Breakdown by Guest Count (Pax):
+                          </span>
+                          <span className="text-[10px] text-[#786150]">
+                            Current selection: <strong>{totalPax} Pax</strong>
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto rounded-xl border border-[#E6D7C3] bg-white">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-[#2C1E15] text-white text-[11px] uppercase tracking-wider">
+                              <tr>
+                                <th className="py-2 px-3 font-bold">Occupancy / Pax</th>
+                                <th className="py-2 px-3 font-bold">Rate (Mon to Thu)</th>
+                                <th className="py-2 px-3 font-bold">Rate (Fri to Sun)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-[#E6D7C3]/40">
+                              {selectedRoom.paxRates.map((tier, idx) => {
+                                const isActive = 
+                                  (idx === 0 && totalPax <= tier.pax) ||
+                                  (totalPax === tier.pax) ||
+                                  (idx === selectedRoom.paxRates!.length - 1 && totalPax >= tier.pax);
+                                return (
+                                  <tr
+                                    key={`tier-${idx}`}
+                                    className={`transition-colors ${
+                                      isActive ? 'bg-amber-100/70 font-bold text-[#2C1E15]' : 'text-[#523A2A] hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    <td className="py-2 px-3 flex items-center gap-1.5">
+                                      {isActive && <span className="w-2 h-2 rounded-full bg-amber-600 shrink-0"></span>}
+                                      <span>{tier.paxLabel}</span>
+                                    </td>
+                                    <td className="py-2 px-3 text-[#2C1E15]">₱{tier.weekdayRate.toLocaleString()}</td>
+                                    <td className="py-2 px-3 text-amber-900">₱{tier.weekendRate.toLocaleString()}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        {selectedRoom.id === 'private-villa-pool' ? (
+                          <p className="text-[11px] text-[#786150] mt-1.5 italic">
+                            * Base rate covers 1 to 10 pax. Extra guests beyond 10 pax: +₱{(selectedRoom.extraPaxFee ?? 500).toLocaleString()} per extra pax / night. Extra pad: +₱{(selectedRoom.extraPadFee ?? 400).toLocaleString()}.
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-[#786150] mt-1.5 italic">
+                            * Extra pax fee: ₱{(selectedRoom.extraPaxFee ?? 300).toLocaleString()} per pax / night beyond base occupancy. {selectedRoom.extraPadFee ? `Extra bed / pad fee: ₱${selectedRoom.extraPadFee.toLocaleString()}.` : ''}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-4.5 rounded-2xl bg-[#FAF7F2] border border-dashed border-[#E6D7C3] text-center space-y-1">
+                    <p className="text-xs font-bold text-[#2C1E15]">No Accommodation Unit Selected</p>
+                    <p className="text-[11px] text-[#786150]">Click any accommodation unit above to view room details, amenities, and rate breakdowns.</p>
+                  </div>
+                )}
+
+              </div>
+            </div>
+
+            {/* STEP 4: Guest Contact Details & My Booking Registration */}
+            <div className="bg-white rounded-3xl p-6 sm:p-7 border border-[#E6D7C3]/60 shadow-lg space-y-5">
+              <div className="flex items-center justify-between border-b border-[#E6D7C3]/40 pb-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 rounded-full bg-[#2C1E15] text-white font-bold flex items-center justify-center text-sm">
+                    4
+                  </span>
+                  <div>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Guest Contact Details</h3>
+                    <p className="text-xs text-[#786150]">Required for booking confirmation and automatic guest account registration</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {/* Full Name */}
+                <div>
+                  <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                    Full Name <span className="text-rose-600 font-bold">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Juan De La Cruz"
+                    value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
+                  />
+                  {formErrors.guestName && (
+                    <span className="text-xs text-rose-600 font-medium block mt-1">
+                      {formErrors.guestName}
+                    </span>
+                  )}
+                </div>
+
+                {/* Active Mobile Number & Email Address */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                      Active mobile number <span className="text-rose-600 font-bold">*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="e.g. 0917 123 4567"
+                      value={guestPhone}
+                      onChange={(e) => setGuestPhone(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
+                    />
+                    {formErrors.guestPhone && (
+                      <span className="text-xs text-rose-600 font-medium block mt-1">
+                        {formErrors.guestPhone}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="e.g. juandelacruz@gmail.com"
+                      value={guestEmail}
+                      onChange={(e) => setGuestEmail(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
+                    />
+                  </div>
+                </div>
+
+                {/* My Booking Registration */}
+                <div className="pt-3 border-t border-[#E6D7C3]/60 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-serif font-bold text-sm text-[#2C1E15] flex items-center gap-1.5">
+                        <KeyRound className="w-4 h-4 text-[#8B6B10]" />
+                        <span>My Booking Registration</span>
+                      </h4>
+                      <p className="text-[11px] text-[#786150]">
+                        Create your guest account credentials to view and manage your booking vouchers anytime under My Bookings.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                      Auto Registration
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                        Username
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Username"
+                        value={guestUsername}
+                        onChange={(e) => setGuestUsername(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                        Password
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showPassword ? "text" : "password"}
+                          placeholder="Choose a password"
+                          value={guestPassword}
+                          onChange={(e) => setGuestPassword(e.target.value)}
+                          className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8B6B10] hover:text-[#2C1E15] p-1 transition-colors cursor-pointer"
+                          title={showPassword ? "Hide password" : "Show password"}
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* STEP 5: Payment Option (Full vs 40% Partial Downpayment) */}
+            <div className="bg-white rounded-3xl p-6 sm:p-7 border border-[#E6D7C3]/60 shadow-lg space-y-4">
+              <div className="flex items-center justify-between border-b border-[#E6D7C3]/40 pb-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 rounded-full bg-[#2C1E15] text-white font-bold flex items-center justify-center text-sm">
+                    5
+                  </span>
+                  <div>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Payment Option</h3>
+                    <p className="text-xs text-[#786150]">Select 40% partial downpayment or 100% full settlement</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 40% Partial Downpayment Card */}
+                <div
+                  onClick={() => setPaymentOption('partial_40')}
+                  className={`p-4.5 rounded-2xl border-2 transition-all cursor-pointer relative flex flex-col justify-between ${
+                    paymentOption === 'partial_40'
+                      ? 'border-[#2C1E15] bg-[#F5EBE6] shadow-md'
+                      : 'border-[#E6D7C3] bg-[#FDFBF7] hover:bg-white'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
+                        Recommended
+                      </span>
+                      <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        paymentOption === 'partial_40' ? 'border-[#2C1E15] bg-[#2C1E15]' : 'border-gray-400'
+                      }`}>
+                        {paymentOption === 'partial_40' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-base text-[#2C1E15]">40% Partial Downpayment</h4>
+                    <p className="text-xs text-[#786150]">
+                      Lock your reservation date today. Pay the remaining 60% balance upon physical check-in at front desk.
+                    </p>
+                  </div>
+                  <div className="pt-3 mt-3 border-t border-[#E6D7C3]/60 flex items-baseline justify-between">
+                    <span className="text-xs text-[#786150]">Pay Now (40%):</span>
+                    <span className="font-bold text-base text-[#2C1E15]">
+                      ₱{Math.round(grandTotal * 0.4).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 100% Full Payment Card */}
+                <div
+                  onClick={() => setPaymentOption('full')}
+                  className={`p-4.5 rounded-2xl border-2 transition-all cursor-pointer relative flex flex-col justify-between ${
+                    paymentOption === 'full'
+                      ? 'border-[#2C1E15] bg-[#F5EBE6] shadow-md'
+                      : 'border-[#E6D7C3] bg-[#FDFBF7] hover:bg-white'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-[#786150] uppercase tracking-wider">
+                        Express Fast Track
+                      </span>
+                      <span className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        paymentOption === 'full' ? 'border-[#2C1E15] bg-[#2C1E15]' : 'border-gray-400'
+                      }`}>
+                        {paymentOption === 'full' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-base text-[#2C1E15]">100% Full Settlement</h4>
+                    <p className="text-xs text-[#786150]">
+                      Pay the complete stay amount today for a zero-balance, instant-key check-in upon arrival.
+                    </p>
+                  </div>
+                  <div className="pt-3 mt-3 border-t border-[#E6D7C3]/60 flex items-baseline justify-between">
+                    <span className="text-xs text-[#786150]">Pay Now (100%):</span>
+                    <span className="font-bold text-base text-[#2C1E15]">
+                      ₱{grandTotal.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* STEP 6: Payment Details & Verified Merchant Accounts */}
+            <div className="bg-white rounded-3xl p-6 sm:p-7 border border-[#E6D7C3]/60 shadow-lg space-y-4">
+              <div className="flex items-center justify-between border-b border-[#E6D7C3]/40 pb-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 rounded-full bg-[#2C1E15] text-white font-bold flex items-center justify-center text-sm">
+                    6
+                  </span>
+                  <div>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Payment Mode & Details</h3>
+                    <p className="text-xs text-[#786150]">Send deposit to our verified merchant accounts</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Method Selector Tabs */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { id: 'gcash', label: 'GCash', icon: Smartphone },
+                  { id: 'bdo', label: 'BDO Bank Transfer', icon: Building2 },
+                  { id: 'card', label: 'Debit / Credit', icon: CreditCard },
+                  { id: 'front_desk', label: 'Front Desk Cash', icon: DollarSign },
+                ].map((m) => {
+                  const Icon = m.icon;
+                  const isCurrent = paymentMethod === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setPaymentMethod(m.id as PaymentMethod)}
+                      className={`p-3 rounded-xl border text-xs font-bold flex flex-col items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        isCurrent
+                          ? 'border-[#2C1E15] bg-[#2C1E15] text-white shadow-sm'
+                          : 'border-[#E6D7C3] bg-[#FDFBF7] text-[#523A2A] hover:bg-[#F5EBE6]'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span>{m.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* GCash Details Card */}
+              {paymentMethod === 'gcash' && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-[#0055EE]/5 border border-[#0055EE]/20 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-[#0055EE] text-white font-black flex items-center justify-center text-xs">
+                        G
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-[#2C1E15]">Official GCash Account</h4>
+                        <p className="text-[11px] text-[#786150]">Instant transfer via GCash Express Send or QR</p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-bold text-[#8B6B10] bg-[#FAF7F2] border border-[#D4AF37]/40 px-2.5 py-0.5 rounded-full shadow-xs">
+                      Verified
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div className="bg-white p-3 rounded-xl border border-[#E6D7C3] flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-[#786150] uppercase font-semibold">Account Name</span>
+                        <div className="text-sm font-bold text-[#2C1E15]">Mark benedict Apelin</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy('Mark benedict Apelin', 'gcash_name')}
+                        className="p-1.5 text-xs text-[#8B6B10] hover:bg-[#FAF7F2] rounded-lg flex items-center gap-1 cursor-pointer font-medium transition-colors"
+                      >
+                        {copiedField === 'gcash_name' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>Copy</span>
+                      </button>
+                    </div>
+
+                    <div className="bg-white p-3 rounded-xl border border-[#E6D7C3] flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-[#786150] uppercase font-semibold">GCash Mobile Number</span>
+                        <div className="text-sm font-mono font-bold text-[#2C1E15]">09175681408</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy('09175681408', 'gcash_num')}
+                        className="p-1.5 text-xs text-[#8B6B10] hover:bg-[#FAF7F2] rounded-lg flex items-center gap-1 cursor-pointer font-semibold transition-colors"
+                      >
+                        {copiedField === 'gcash_num' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* BDO Bank Details Card */}
+              {paymentMethod === 'bdo' && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-[#FAF7F2] border border-[#E6D7C3] space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-[#3D2616] text-[#FAF7F2] font-black flex items-center justify-center text-xs shadow-xs">
+                        BDO
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-[#2C1E15]">BDO (Banco de Oro) Savings Account</h4>
+                        <p className="text-[11px] text-[#786150]">Online Bank Transfer, InstaPay, or Over-the-counter</p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-bold text-[#8B6B10] bg-[#FAF7F2] border border-[#D4AF37]/40 px-2.5 py-0.5 rounded-full shadow-xs">
+                      Verified
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div className="bg-white p-3 rounded-xl border border-[#E6D7C3] flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-[#786150] uppercase font-semibold">Account Holder</span>
+                        <div className="text-sm font-bold text-[#2C1E15]">mark benedict v. apelin</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy('mark benedict v. apelin', 'bdo_name')}
+                        className="p-1.5 text-xs text-[#8B6B10] hover:bg-[#FAF7F2] rounded-lg flex items-center gap-1 cursor-pointer font-medium transition-colors"
+                      >
+                        {copiedField === 'bdo_name' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>Copy</span>
+                      </button>
+                    </div>
+
+                    <div className="bg-white p-3 rounded-xl border border-[#E6D7C3] flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-[#786150] uppercase font-semibold">BDO Account Number</span>
+                        <div className="text-sm font-mono font-bold text-[#2C1E15]">0082 2007 7587</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy('008220077587', 'bdo_acc')}
+                        className="p-1.5 text-xs text-[#8B6B10] hover:bg-[#FAF7F2] rounded-lg flex items-center gap-1 cursor-pointer font-semibold transition-colors"
+                      >
+                        {copiedField === 'bdo_acc' ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>Copy</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Card / Front Desk Notice */}
+              {(paymentMethod === 'card' || paymentMethod === 'front_desk') && (
+                <div className="p-4 rounded-2xl bg-[#F5EBE6] border border-[#E6D7C3] space-y-2">
+                  <div className="flex items-center gap-2 text-xs font-bold text-[#2C1E15]">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Front Desk Settlement Guarantee</span>
+                  </div>
+                  <p className="text-xs text-[#786150] leading-relaxed">
+                    For card payments or direct front desk cash settlement, an initial security deposit of at least <strong>₱500</strong> or booking guarantee slip is requested to prevent no-shows. Alternatively, please upload an ID or reservation authorization image below.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* STEP 7: MANDATORY Payment Slip / Receipt Upload */}
+            <div className={`bg-white rounded-3xl p-6 sm:p-7 border-2 shadow-lg space-y-4 ${
+              formErrors.paymentSlip ? 'border-rose-400 bg-rose-50/20' : 'border-[#E6D7C3]/60'
+            }`}>
+              <div className="flex items-center justify-between border-b border-[#E6D7C3]/40 pb-3">
+                <div className="flex items-center gap-3">
+                  <span className="w-8 h-8 rounded-full bg-rose-700 text-white font-bold flex items-center justify-center text-sm">
+                    7
+                  </span>
+                  <div>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15] flex items-center gap-2">
+                      <span>Mandatory Payment Slip / Receipt Upload</span>
+                      <span className="text-rose-600 text-xs font-sans font-bold bg-rose-100 px-2 py-0.5 rounded-full">
+                        Required
+                      </span>
+                    </h3>
+                    <p className="text-xs text-[#786150]">Upload a clear photo or screenshot of your GCash/Bank transfer confirmation</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Upload Drop Zone */}
+              {!slipPreviewUrl ? (
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-[#E6D7C3] hover:border-[#2C1E15] rounded-2xl p-6 sm:p-8 text-center bg-[#FDFBF7] hover:bg-[#F5EBE6] transition-all cursor-pointer group"
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,.pdf"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                  <div className="w-12 h-12 rounded-2xl bg-[#E6D7C3]/50 text-[#2C1E15] flex items-center justify-center mx-auto mb-3 group-hover:scale-110 transition-transform">
+                    <Upload className="w-6 h-6" />
+                  </div>
+                  <div className="font-bold text-sm text-[#2C1E15]">
+                    Click or Drag & Drop Payment Deposit Slip
+                  </div>
+                  <p className="text-xs text-[#786150] mt-1">
+                    Supports PNG, JPG, JPEG, or WebP screenshot (Max: 10MB)
+                  </p>
+                  <div className="inline-flex items-center gap-1.5 bg-rose-50 text-rose-700 px-3 py-1 rounded-full text-[11px] font-semibold mt-3 border border-rose-200">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>Submission will be blocked without this slip</span>
+                  </div>
+                </div>
+              ) : (
+                /* Uploaded Thumbnail Preview */
+                <div className="p-4 bg-[#F5EBE6] rounded-2xl border border-[#E6D7C3] flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={slipPreviewUrl}
+                      alt="Uploaded Payment Slip"
+                      className="w-20 h-20 object-cover rounded-xl border border-white shadow-md"
+                    />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span className="font-bold text-sm text-[#2C1E15]">
+                          Receipt Attached
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#786150] mt-0.5 truncate max-w-xs">
+                        {slipFile?.name || 'payment_receipt.jpg'}
+                      </p>
+                      <span className="text-[11px] text-emerald-700 font-semibold">
+                        Ready for Front-Desk verification
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-2 bg-white hover:bg-gray-100 text-[#2C1E15] text-xs font-bold rounded-xl border border-[#E6D7C3] transition-colors cursor-pointer"
+                    >
+                      Replace File
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleRemoveSlip}
+                      className="p-2 text-rose-600 hover:bg-rose-100 rounded-xl transition-colors cursor-pointer"
+                      title="Remove attachment"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {slipUploadError && (
+                <div className="bg-rose-50 border border-rose-300 text-rose-800 p-3 rounded-xl text-xs flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{slipUploadError}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Mobile Submit Trigger Button */}
+            <div className="lg:hidden">
+              <button
+                type="submit"
+                className="w-full py-4 bg-gradient-to-r from-[#2C1E15] via-[#523A2A] to-[#2C1E15] text-white text-base font-bold rounded-2xl shadow-xl hover:brightness-110 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Check className="w-5 h-5 text-amber-300" />
+                <span>Confirm & Book Reservation</span>
+              </button>
+            </div>
+
+          </form>
+
+        </div>
+
+        {/* Right Column: Live Stay Summary Card (Sticky) */}
+        <div className="lg:col-span-4 sticky top-28 space-y-4">
+          
+          <div className="bg-white/95 backdrop-blur-xl rounded-3xl p-6 border-2 border-[#E6D7C3] shadow-2xl space-y-5">
+            
+            {/* Summary Header */}
+            <div className="flex items-center justify-between border-b border-[#E6D7C3]/60 pb-3">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-[#2C1E15]" />
+                <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Stay Summary</h3>
+              </div>
+              <span className="text-xs bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded-full">
+                Live Calculator
+              </span>
+            </div>
+
+            {/* Selected Room Info with Room Multipliers */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase tracking-wider text-[#786150] font-bold">
+                  Selected Accommodation ({selectedRooms.length})
+                </span>
+                <span className="text-[11px] font-bold bg-[#2C1E15] text-amber-200 px-2 py-0.5 rounded-full">
+                  {selectedRooms.length} Unit{selectedRooms.length > 1 ? "s" : ""}
+                </span>
+              </div>
+
+              {/* Individual Selected Accommodation Units */}
+              {selectedRooms.length === 0 ? (
+                <div className="text-xs bg-[#FAF7F2] p-3 rounded-xl border border-dashed border-[#E6D7C3] text-center text-[#786150]">
+                  No accommodation unit selected yet.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {selectedRooms.map((room, idx) => {
+                    const roomUnitName = room.roomNumber || room.title.split("–")[0].trim();
+                    const baseCap = getRoomBaseCapacity(room);
+                    const maxCap = getRoomMaxAccommodation(room);
+                    const extraPaxCount = roomExtraPaxMap[room.id] || 0;
+                    const assignedPax = roomPaxQuantityMap[room.id] || (extraPaxCount > 0 ? baseCap + extraPaxCount : baseCap);
+
+                    return (
+                      <div
+                        key={`summary-ind-room-${room.id}-${idx}`}
+                        className="text-xs bg-[#FDFBF7] p-3 rounded-xl border border-[#E6D7C3] space-y-1.5 shadow-2xs"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-bold text-[#2C1E15] text-sm">
+                              {roomUnitName}
+                            </div>
+                            <div className="text-[11px] text-[#786150] font-medium">
+                              Room Type: <span className="font-bold text-[#2C1E15]">{room.category}</span>
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                            Unit #{idx + 1}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1.5 border-t border-[#E6D7C3]/50 text-[11px]">
+                          <span className="text-[#786150]">Adult Pax:</span>
+                          <span className="font-bold text-amber-900 bg-amber-100/60 px-2 py-0.5 rounded">
+                            {assignedPax} Adult Pax ({maxCap} Pax Max)
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Itemized Breakdown Table */}
+            <div className="space-y-2 pt-3 border-t border-[#E6D7C3]/40 text-xs">
+              
+              {/* Base Rate with Multiplier */}
+              <div className="flex items-center justify-between">
+                <span className="text-[#523A2A] font-bold">
+                  Base Accommodation ({selectedRooms.length} unit{selectedRooms.length > 1 ? "s" : ""}, {stayType === 'nightly' ? `${calculatedNights} night(s)` : `${hourlyDuration} hrs`})
+                </span>
+                <span className="font-bold text-[#2C1E15]">₱{baseStayRate.toLocaleString()}</span>
+              </div>
+
+              {/* Individual Accommodation Rates Breakdown */}
+              {selectedRooms.length > 0 && (
+                <div className="pl-2 border-l-2 border-amber-400 space-y-1 py-1 bg-amber-50/30 rounded-r-lg max-h-48 overflow-y-auto">
+                  {selectedRooms.map((room, idx) => {
+                    const roomUnitName = room.roomNumber || room.title.split("–")[0].trim();
+                    const baseCap = getRoomBaseCapacity(room);
+                    const extraPaxCount = roomExtraPaxMap[room.id] || 0;
+                    const assignedPax = roomPaxQuantityMap[room.id] || (extraPaxCount > 0 ? baseCap + extraPaxCount : baseCap);
+                    let roomCost = 0;
+                    if (stayType === "nightly") {
+                      const start = new Date(checkInDate);
+                      const end = new Date(checkOutDate);
+                      const cur = new Date(start);
+                      while (cur < end) {
+                        roomCost += getNightlyRateForDate(cur, room, adultGuests, child6to10Guests, child1to5Guests);
+                        cur.setDate(cur.getDate() + 1);
+                      }
+                      if (start >= end) {
+                        roomCost += getNightlyRateForDate(start, room, adultGuests, child6to10Guests, child1to5Guests);
+                      }
+                    } else {
+                      if (hourlyDuration === 3) roomCost += room.pricing.hourly3hr || 500;
+                      else if (hourlyDuration === 6) roomCost += room.pricing.hourly6hr || 800;
+                      else roomCost += room.pricing.hourly12hr || 1100;
+                    }
+
+                    return (
+                      <div key={`ind-room-cost-${room.id}-${idx}`} className="flex items-center justify-between text-[11px] text-[#523A2A]">
+                        <span className="font-medium">
+                          {roomUnitName} ({assignedPax} Adult Pax):
+                        </span>
+                        <span className="font-bold text-[#2C1E15]">₱{roomCost.toLocaleString()}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+
+
+              {/* Children (6-10 yrs) Summary Line Item */}
+              {child6to10Guests > 0 && (
+                <div className="flex items-center justify-between text-[11px] text-amber-900 bg-amber-50/80 px-2.5 py-1 rounded-lg border border-amber-200/80">
+                  <span className="font-semibold">Children (6–10 yrs) x{child6to10Guests}:</span>
+                  <span className="font-bold">
+                    +₱{(nightlyBreakdown.reduce((sum, item) => sum + item.child6to10Cost, 0) || (child6to10Guests * 200)).toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              {/* Toddlers / Kids (1-5 yrs) Summary Line Item */}
+              {child1to5Guests > 0 && (
+                <div className="flex items-center justify-between text-[11px] text-emerald-800 bg-emerald-50/80 px-2.5 py-1 rounded-lg border border-emerald-200/80">
+                  <span className="font-semibold">Toddlers / Kids (1–5 yrs) x{child1to5Guests}:</span>
+                  <span className="font-bold text-emerald-700">₱0 (FREE)</span>
+                </div>
+              )}
+
+              {/* Night-by-night breakdown */}
+              {stayType === 'nightly' && nightlyBreakdown.length > 0 && (
+                <div className="pl-2 border-l-2 border-[#E6D7C3] space-y-1 py-1">
+                  {nightlyBreakdown.map((item, idx) => (
+                    <div key={`breakdown-${idx}`} className="space-y-0.5 text-[11px] text-[#786150]">
+                      <div className="flex items-center justify-between">
+                        <span>
+                          {item.label} ({item.isWeekend ? 'Fri–Sat' : 'Sun–Thu'}):
+                        </span>
+                        <span className="font-medium text-[#2C1E15]">₱{item.rate.toLocaleString()}</span>
+                      </div>
+                      {item.child6to10Cost > 0 && (
+                        <div className="text-[10px] text-amber-800 flex justify-between pl-2">
+                          <span>↳ {child6to10Guests}x Kid (6–10y @ ₱{item.isWeekend ? '250' : '200'}):</span>
+                          <span>+₱{item.child6to10Cost.toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add-ons line items */}
+              {availableAddons.map((addon) => {
+                const qty = addonQuantities[addon.id] || 0;
+                if (qty === 0) return null;
+                const cost = getAddonCost(addon, qty);
+                const isExtraPax = addon.id === 'extra_pax_all_rooms';
+                return (
+                  <div key={`summary-addon-${addon.id}`} className="flex items-center justify-between text-[#786150]">
+                    <span>
+                      {addon.name} (x{qty}
+                      {isExtraPax ? ` • ${extraPaxCalendarRateInfo.unitLabel}` : ''})
+                    </span>
+                    <span className="font-medium text-[#2C1E15]">₱{cost.toLocaleString()}</span>
+                  </div>
+                );
+              })}
+
+              {/* Grand Total Row */}
+              <div className="flex items-baseline justify-between pt-3 border-t border-[#E6D7C3] text-sm">
+                <span className="font-serif font-bold text-[#2C1E15] text-base">Grand Total</span>
+                <span className="font-bold text-xl text-[#2C1E15]">₱{grandTotal.toLocaleString()}</span>
+              </div>
+
+            </div>
+
+            {/* Payment Split Highlight Box - 'Partial:' as requested */}
+            <div className="bg-[#2C1E15] text-white p-4 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs text-[#E6D7C3]">
+                <span>Partial:</span>
+                <span className="font-bold uppercase tracking-wider text-amber-300">
+                  {paymentOption === 'partial_40' ? '40% Downpayment' : '100% Full Payment'}
+                </span>
+              </div>
+
+              <div className="flex items-baseline justify-between pt-1 border-t border-white/20">
+                <span className="text-xs font-semibold text-[#F5EBE6]">Payable Now:</span>
+                <span className="text-2xl font-bold text-emerald-400">
+                  ₱{amountPayableNow.toLocaleString()}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-[#E6D7C3] pt-1 border-t border-white/10">
+                <span>Remaining Balance at Check-in:</span>
+                <span className="font-semibold text-white">
+                  ₱{remainingBalance.toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Slip Status Indicator */}
+            <div className="text-xs">
+              {slipPreviewUrl ? (
+                <div className="flex items-center gap-1.5 text-emerald-700 font-semibold bg-emerald-50 p-2 rounded-xl border border-emerald-200">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Payment Deposit Slip attached</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-amber-800 font-medium bg-amber-50 p-2 rounded-xl border border-amber-200">
+                  <AlertCircle className="w-4 h-4 text-amber-600" />
+                  <span>Attach payment slip in Step 7 to submit</span>
+                </div>
+              )}
+            </div>
+
+            {/* Desktop Submit Button */}
+            <div className="hidden lg:block pt-2">
+              <button
+                type="button"
+                onClick={handleSubmitBooking}
+                className="w-full py-4 bg-gradient-to-r from-[#2C1E15] via-[#523A2A] to-[#2C1E15] text-white text-base font-bold rounded-2xl shadow-xl hover:brightness-110 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Check className="w-5 h-5 text-amber-300" />
+                <span>Confirm & Book Reservation</span>
+              </button>
+            </div>
+
+            <div className="text-[11px] text-[#786150] text-center">
+              Instant printable booking voucher issued immediately upon submission.
+            </div>
+
+            {/* Cancellation Policy Banner */}
+            <div className="p-3.5 bg-[#FDFBF7] rounded-xl border border-[#E6D7C3] text-[11px] text-[#786150] space-y-1">
+              <span className="font-bold text-[#2C1E15] block">Cancellation &amp; Rebooking Policy:</span>
+              <p>• Upon booking require for 40% downpayment</p>
+              <p>• Downpayment non refundable</p>
+              <p>• Rebooking allowed within 3 days before check-in date, 20% rebooking fee apply</p>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  );
+};
