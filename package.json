@@ -1,8 +1,10 @@
 {
-  "name": "react-example",
+  "name": "viganbooking",
+  "description": "Diversion Vigan Transient & Villa Booking System",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "server.js",
   "bin": {
     "next": "./scripts/next-cli.js"
   },
