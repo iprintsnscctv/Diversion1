@@ -44,6 +44,48 @@ import {
 } from 'lucide-react';
 import { VillaLogo } from './VillaLogo';
 import { INITIAL_BOOKINGS } from '../data/roomsData';
+// Max extra pax allowed per room according to specifications:
+// Eligible Rooms (Max to add: 1 extra pax): Room 0, 1, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16
+// Eligible Rooms (Max to add: 2 extra pax): Room 11, 2, 3
+// Private Villa (Max to add: 10 extra pax): Private Villa
+// Other Rooms: Max to add: 0 (strictly limited to standard capacity)
+export const getRoomMaxExtraPax = (room: RoomUnit): number => {
+  if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+    return 10;
+  }
+  const eligible1 = ['0', '1', '4', '5', '6', '7', '8', '9', '10', '12', '13', '14', '15', '16', '18'];
+  const eligible2 = ['11', '2', '3'];
+  const match = (room.roomNumber || room.title).match(/\d+/);
+  const numStr = match ? match[0] : room.id.replace('room-', '');
+  if (eligible2.includes(numStr)) return 2;
+  if (eligible1.includes(numStr)) return 1;
+  return 0;
+};
+
+// Base standard capacity before extra pax
+export const getRoomBaseCapacity = (room: RoomUnit): number => {
+  if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+    return 10;
+  }
+  if (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-18' || room.id === 'room-7') return 8;
+  if (room.id === 'room-2' || room.id === 'room-3') return 10;
+  if (room.id === 'room-4' || room.id === 'room-5' || room.id === 'room-6') return 7;
+  if (room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16') return 5;
+  if (room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10') return 3;
+  if (room.id === 'room-11') return 2;
+  return room.capacity?.maxGuests || 3;
+};
+
+// Max total accommodation including allowable extra pax
+export const getRoomMaxAccommodation = (room: RoomUnit): number => {
+  if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+    return 20; // 10 Standard + 10 Extra Pax
+  }
+  const maxExtra = getRoomMaxExtraPax(room);
+  const baseCap = getRoomBaseCapacity(room);
+  const declaredMax = room.capacity?.maxGuests || 0;
+  return Math.max(baseCap + maxExtra, declaredMax);
+};
 
 interface BookingEngineTabProps {
   rooms: RoomUnit[];
@@ -214,23 +256,62 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     return Array.from(map.values());
   }, [selectedRooms]);
 
-  // Total pax headcount
+  // Total pax headcount (sum of pax + child pax across selected rooms)
   const totalPax = useMemo(() => {
+    if (selectedRooms.length > 0) {
+      const sum = selectedRooms.reduce((acc, r) => {
+        const p = roomPaxQuantityMap[r.id] || getRoomBaseCapacity(r);
+        const c = roomChildPaxMap[r.id] || 0;
+        return acc + p + c;
+      }, 0);
+      if (sum > 0) return sum;
+    }
     return Math.max(1, adultGuests + child6to10Guests + child1to5Guests);
-  }, [adultGuests, child6to10Guests, child1to5Guests]);
+  }, [selectedRooms, roomPaxQuantityMap, roomChildPaxMap, adultGuests, child6to10Guests, child1to5Guests]);
 
-  // Compute booked dates for currently selected room unit
+  // Synchronize total adult guests and total children from selected rooms
+  useEffect(() => {
+    if (selectedRooms.length > 0) {
+      let totalAdult = 0;
+      let totalChildren = 0;
+      selectedRooms.forEach((r) => {
+        const p = roomPaxQuantityMap[r.id] || getRoomBaseCapacity(r);
+        const c = roomChildPaxMap[r.id] || 0;
+        totalAdult += p;
+        totalChildren += c;
+      });
+      setAdultGuests(totalAdult);
+      setChild6to10Guests(totalChildren);
+    }
+  }, [selectedRooms, roomPaxQuantityMap, roomChildPaxMap]);
+
+  // Compute booked dates for currently selected room unit(s)
   const bookedDatesSet = useMemo(() => {
     const set = new Set<string>();
     const list = existingBookings && existingBookings.length > 0 ? existingBookings : INITIAL_BOOKINGS;
 
     list.forEach((b) => {
-      if (selectedRoomIds.includes(b.roomId) && b.status !== 'Cancelled') {
+      // Check if this booking matches any of the currently selected accommodation units (or all units if none selected)
+      const matchesRoom =
+        selectedRoomIds.length === 0 ||
+        selectedRoomIds.includes(b.roomId) ||
+        selectedRooms.some(
+          (r) =>
+            r.id === b.roomId ||
+            (r.roomNumber && b.roomTitle && b.roomTitle.toLowerCase().includes(r.roomNumber.toLowerCase()))
+        );
+
+      if (matchesRoom && b.status !== 'Cancelled') {
         if (b.stayType === 'nightly' && b.checkInDate && b.checkOutDate) {
-          const cur = new Date(b.checkInDate);
-          const end = new Date(b.checkOutDate);
+          const [sy, sm, sd] = b.checkInDate.split('-').map(Number);
+          const [ey, em, ed] = b.checkOutDate.split('-').map(Number);
+          const cur = new Date(sy, sm - 1, sd, 12, 0, 0);
+          const end = new Date(ey, em - 1, ed, 12, 0, 0);
           while (cur < end) {
-            set.add(cur.toISOString().split('T')[0]);
+            const yStr = cur.getFullYear();
+            const mStr = String(cur.getMonth() + 1).padStart(2, '0');
+            const dStr = String(cur.getDate()).padStart(2, '0');
+            set.add(`${yStr}-${mStr}-${dStr}`);
             cur.setDate(cur.getDate() + 1);
           }
         } else if (b.hourlyDate) {
@@ -240,7 +321,88 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     });
 
     return set;
-  }, [existingBookings, selectedRoomIds]);
+  }, [existingBookings, selectedRoomIds, selectedRooms]);
+
+  // Helper to check room booking status for selected dates and overall
+  const getRoomBookingInfo = useCallback(
+    (room: RoomUnit) => {
+      const list = existingBookings && existingBookings.length > 0 ? existingBookings : INITIAL_BOOKINGS;
+      const roomBookings = list.filter((b) => {
+        if (b.status === 'Cancelled') return false;
+        if (b.roomId === room.id) return true;
+        if (
+          room.roomNumber &&
+          (b.roomId === room.roomNumber || (b.roomTitle && b.roomTitle.toLowerCase().includes(room.roomNumber.toLowerCase())))
+        ) {
+          return true;
+        }
+        if (
+          room.roomNumbers &&
+          room.roomNumbers.some(
+            (rn) => b.roomId === rn || (b.roomTitle && b.roomTitle.toLowerCase().includes(rn.toLowerCase()))
+          )
+        ) {
+          return true;
+        }
+        return false;
+      });
+
+      if (roomBookings.length === 0) {
+        return {
+          isBookedForSelectedDates: false,
+          hasAnyBooking: false,
+          bookedDatesSummary: '',
+          bookings: [] as BookingRecord[],
+        };
+      }
+
+      let isBookedForSelectedDates = false;
+      const dateSummaries: string[] = [];
+
+      roomBookings.forEach((b) => {
+        if (b.stayType === 'nightly' && b.checkInDate && b.checkOutDate) {
+          dateSummaries.push(`${b.checkInDate} to ${b.checkOutDate}`);
+          if (stayType === 'nightly') {
+            const sStart = checkInDate;
+            const sEnd = checkOutDate || checkInDate;
+            if (sStart && sEnd) {
+              // Overlaps if booking start < stay end && booking end > stay start
+              if (b.checkInDate < sEnd && b.checkOutDate > sStart) {
+                isBookedForSelectedDates = true;
+              }
+            }
+          } else if (stayType === 'hourly') {
+            if (hourlyDate && hourlyDate >= b.checkInDate && hourlyDate < b.checkOutDate) {
+              isBookedForSelectedDates = true;
+            }
+          }
+        } else if (b.hourlyDate) {
+          dateSummaries.push(b.hourlyDate);
+          if (stayType === 'nightly') {
+            const sStart = checkInDate;
+            const sEnd = checkOutDate || checkInDate;
+            if (sStart && sEnd) {
+              if (b.hourlyDate >= sStart && b.hourlyDate < sEnd) {
+                isBookedForSelectedDates = true;
+              }
+            }
+          } else if (stayType === 'hourly') {
+            if (hourlyDate === b.hourlyDate) {
+              isBookedForSelectedDates = true;
+            }
+          }
+        }
+      });
+
+      return {
+        isBookedForSelectedDates,
+        hasAnyBooking: roomBookings.length > 0,
+        bookedDatesSummary: dateSummaries.join(', '),
+        bookings: roomBookings,
+      };
+    },
+    [existingBookings, stayType, checkInDate, checkOutDate, hourlyDate]
+  );
 
   // Compute number of nights for nightly stays
   const calculatedNights = useMemo(() => {
@@ -699,48 +861,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     });
   };
 
-  // Max extra pax allowed per room according to specifications:
-  // Eligible Rooms (Max to add: 1 extra pax): Room 0, 1, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16
-  // Eligible Rooms (Max to add: 2 extra pax): Room 11, 2, 3
-  // Private Villa (Max to add: 10 extra pax): Private Villa
-  // Other Rooms: Max to add: 0 (strictly limited to standard capacity)
-  const getRoomMaxExtraPax = (room: RoomUnit): number => {
-    if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
-      return 10;
-    }
-    const eligible1 = ['0', '1', '4', '5', '6', '7', '8', '9', '10', '12', '13', '14', '15', '16', '18'];
-    const eligible2 = ['11', '2', '3'];
-    const match = (room.roomNumber || room.title).match(/\d+/);
-    const numStr = match ? match[0] : room.id.replace('room-', '');
-    if (eligible2.includes(numStr)) return 2;
-    if (eligible1.includes(numStr)) return 1;
-    return 0;
-  };
-
-  // Base standard capacity before extra pax
-  const getRoomBaseCapacity = (room: RoomUnit): number => {
-    if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
-      return 10;
-    }
-    if (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-18' || room.id === 'room-7') return 8;
-    if (room.id === 'room-2' || room.id === 'room-3') return 10;
-    if (room.id === 'room-4' || room.id === 'room-5' || room.id === 'room-6') return 7;
-    if (room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16') return 5;
-    if (room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10') return 3;
-    if (room.id === 'room-11') return 2;
-    return room.capacity?.maxGuests || 3;
-  };
-
-  // Max total accommodation including allowable extra pax
-  const getRoomMaxAccommodation = (room: RoomUnit): number => {
-    if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
-      return 20; // 10 Standard + 10 Extra Pax
-    }
-    const maxExtra = getRoomMaxExtraPax(room);
-    const baseCap = getRoomBaseCapacity(room);
-    return baseCap + maxExtra;
-  };
-
   // Set individual pax quantity for a room or villa
   const handleSetRoomPaxQuantity = (roomId: string, paxQty: number) => {
     const roomObj = rooms.find((r) => r.id === roomId);
@@ -915,12 +1035,12 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
       }
     }
 
-    // 3. Booked Date -> Red (Few Rooms Available)
+    // 3. Booked Date -> Red (Booked)
     if (bookedDatesSet.has(dateStr)) {
       return {
         type: 'booked',
-        bg: 'bg-red-500 text-white font-bold shadow-xs',
-        badge: 'Few Rooms Available',
+        bg: 'bg-red-600 text-white font-bold shadow-xs hover:bg-red-700',
+        badge: 'Booked',
       };
     }
 
@@ -937,7 +1057,13 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     if (dateStr < todayStr) return;
 
     if (bookedDatesSet.has(dateStr)) {
-      setCalendarNotice(`Date ${dateStr} has few rooms available for ${selectedRoom ? selectedRoom.title : 'the chosen unit'}. Please pick an orange (available) date.`);
+      const roomNames =
+        selectedRooms.length > 0
+          ? selectedRooms.map((r) => r.roomNumber || r.title).join(', ')
+          : selectedRoom
+          ? selectedRoom.roomNumber || selectedRoom.title
+          : 'the selected room';
+      setCalendarNotice(`Date ${dateStr} is already booked for ${roomNames}. Please pick an orange (available) date.`);
       setTimeout(() => setCalendarNotice(''), 4500);
       return;
     }
@@ -1183,9 +1309,9 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
           
           <form onSubmit={handleSubmitBooking} className="space-y-8">
             
-            {/* STEP 2: Stay Type, Schedule & Availability Calendar */}
+            {/* STEP 1: Stay Type, Schedule & Availability Calendar */}
             <div className="bg-white rounded-3xl p-6 sm:p-7 border border-[#E6D7C3]/60 shadow-lg space-y-6">
-              <div className="flex items-center justify-between border-b border-[#E6D7C3]/40 pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#E6D7C3]/40 pb-3 gap-3">
                 <div className="flex items-center gap-3">
                   <span className="w-8 h-8 rounded-full bg-[#2C1E15] text-white font-bold flex items-center justify-center text-sm">
                     1
@@ -1195,9 +1321,79 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                     <p className="text-xs text-[#786150]">Check live room availability calendar and choose your dates</p>
                   </div>
                 </div>
+
+                {/* Stay Type Toggle: Nightly vs Hourly */}
+                <div className="flex items-center gap-1.5 bg-[#FAF7F2] p-1 rounded-2xl border border-[#E6D7C3] self-start sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setStayType('nightly')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      stayType === 'nightly'
+                        ? 'bg-[#2C1E15] text-white shadow-xs'
+                        : 'text-[#523A2A] hover:bg-white'
+                    }`}
+                  >
+                    <span>🌙 Nightly Stay</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStayType('hourly')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      stayType === 'hourly'
+                        ? 'bg-[#2C1E15] text-white shadow-xs'
+                        : 'text-[#523A2A] hover:bg-white'
+                    }`}
+                  >
+                    <span>⏱️ Short Stay (3h / 6h)</span>
+                  </button>
+                </div>
               </div>
 
-
+              {/* Synced Accommodation Unit Selector Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#FAF7F2] p-3 sm:p-3.5 rounded-2xl border border-[#E6D7C3]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Building2 className="w-4 h-4 text-[#B8860B] shrink-0" />
+                  <span className="text-xs font-bold text-[#2C1E15] uppercase tracking-wider shrink-0">
+                    Synced Unit:
+                  </span>
+                  <span className="text-xs font-bold text-[#8B6B10] truncate">
+                    {selectedRooms.length === 1
+                      ? `${selectedRooms[0].roomNumber || selectedRooms[0].title} (${selectedRooms[0].category})`
+                      : selectedRooms.length > 1
+                      ? `${selectedRooms.length} Units Selected: ${selectedRooms.map((r) => r.roomNumber || r.title.split('–')[0].trim()).join(', ')}`
+                      : 'All Accommodation Units'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <label className="text-[11px] font-bold text-[#786150]">Switch Unit:</label>
+                  <select
+                    value={selectedRooms.length === 1 ? selectedRooms[0].id : selectedRooms.length > 1 ? 'multi' : 'all'}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === 'all') {
+                        setSelectedRoomIds([]);
+                        setSelectedRoomNumberFilter('');
+                      } else if (val !== 'multi') {
+                        setSelectedRoomIds([val]);
+                        setSelectedRoomNumberFilter(val);
+                      }
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs font-bold text-[#2C1E15] outline-none cursor-pointer focus:ring-2 focus:ring-[#B8860B]"
+                  >
+                    <option value="all">All Accommodation Units</option>
+                    {selectedRooms.length > 1 && (
+                      <option value="multi" disabled>
+                        {selectedRooms.length} Units Selected
+                      </option>
+                    )}
+                    {rooms.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.roomNumber || r.title} ({r.category})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
               {/* Availability Calendar Section with requested color coding */}
               <div className="p-4 sm:p-5 rounded-2xl bg-[#FDFBF7] border-2 border-[#E6D7C3] space-y-4">
@@ -1207,10 +1403,19 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                   <div>
                     <h4 className="font-serif font-bold text-base text-[#2C1E15] flex items-center gap-2">
                       <CalendarIcon className="w-4 h-4 text-[#2C1E15]" />
-                      <span>Availability Calendar{selectedRoom ? ` — ${selectedRoom.title}` : ''}</span>
+                      <span>
+                        Availability Calendar —{' '}
+                        {selectedRooms.length === 1
+                          ? (selectedRoom ? (selectedRoom.roomNumber || selectedRoom.title) : 'All Units')
+                          : selectedRooms.length > 1
+                          ? `${selectedRooms.length} Units Selected (${selectedRooms.map((r) => r.roomNumber || r.title.split('–')[0].trim()).join(', ')})`
+                          : 'All Units'}
+                      </span>
                     </h4>
                     <p className="text-xs text-[#786150]">
-                      Click an orange date below to set your stay schedule
+                      {selectedRooms.length > 0
+                        ? `Dates in red are already booked for ${selectedRooms.map((r) => r.roomNumber || r.title.split('–')[0].trim()).join(', ')}. Click an orange (available) date below.`
+                        : 'Dates in red are already booked across units. Click an orange (available) date below to set your stay schedule.'}
                     </p>
                   </div>
 
@@ -1238,16 +1443,16 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                   </div>
                 </div>
 
-                {/* Color Legend (Red: Few Rooms Available, Orange: Available, Green: Selected Date) */}
+                {/* Color Legend (Red: Booked, Orange: Available, Green: Selected Date) */}
                 <div className="bg-white p-3 rounded-xl border border-[#E6D7C3]/70 flex flex-wrap items-center justify-between gap-3 text-xs">
                   <span className="font-bold text-[#2C1E15] uppercase text-[11px] tracking-wider">
                     Calendar Legend:
                   </span>
                   <div className="flex flex-wrap items-center gap-3 sm:gap-5">
-                    {/* Red Few Rooms Available */}
+                    {/* Red Booked */}
                     <div className="flex items-center gap-1.5">
-                      <span className="w-3.5 h-3.5 rounded-md bg-red-500 shadow-xs"></span>
-                      <span className="font-bold text-red-950">Red: Few Rooms Available</span>
+                      <span className="w-3.5 h-3.5 rounded-md bg-red-600 shadow-xs"></span>
+                      <span className="font-bold text-red-950">Red: Booked</span>
                     </div>
                     {/* Orange Available */}
                     <div className="flex items-center gap-1.5">
@@ -1428,7 +1633,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                         Accommodation Unit (All Rooms) — Multiple Choices Allowed
                       </label>
                       <p className="text-[11px] text-[#786150]">
-                        Choose your pax and click the room number to see the actual rate
+                        Choose your pax and click the room number to see the actual rate • <span className="text-red-700 font-bold inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-600 inline-block"></span> Highlighted in red = Already Booked</span>
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -1464,6 +1669,9 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                   <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-2 lg:grid-cols-2 gap-2 mb-3 max-h-80 overflow-y-auto p-2 bg-[#FAF7F2] rounded-2xl border border-[#E6D7C3]/80">
                     {rooms.map((room) => {
                       const isSelected = selectedRoomIds.includes(room.id);
+                      const bookingInfo = getRoomBookingInfo(room);
+                      const isBookedForDates = bookingInfo.isBookedForSelectedDates;
+                      const hasAnyBooking = bookingInfo.hasAnyBooking;
                       const roomUnitName = room.roomNumber || room.title.split("–")[0].trim();
                       const capText = (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-18' || room.id === 'room-7')
                         ? '8 Pax'
@@ -1484,6 +1692,10 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                       const currentPaxQuantity = roomPaxQuantityMap[room.id] || (currentRoomExtraPax > 0 ? baseCap + currentRoomExtraPax : baseCap);
 
                       const toggleRoomSelection = () => {
+                        if (isBookedForDates) {
+                          setCalendarNotice(`${roomUnitName} is already booked for ${stayType === 'nightly' ? `${checkInDate} to ${checkOutDate}` : hourlyDate}. Please choose an available room or change your dates on the calendar above.`);
+                          setTimeout(() => setCalendarNotice(''), 5000);
+                        }
                         if (isSelected) {
                           const remainingIds = selectedRoomIds.filter((id) => id !== room.id);
                           setSelectedRoomIds(remainingIds);
@@ -1523,7 +1735,15 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                             }
                           }}
                           className={`w-full p-3 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between gap-2.5 select-none shadow-2xs ${
-                            isSelected
+                            isBookedForDates
+                              ? isSelected
+                                ? "bg-red-950 text-white border-2 border-red-500 shadow-md ring-2 ring-red-400"
+                                : "bg-red-50 text-red-950 border-2 border-red-500 ring-2 ring-red-300 hover:bg-red-100/90 shadow-xs"
+                              : hasAnyBooking
+                              ? isSelected
+                                ? "bg-[#2C1E15] text-white border-2 border-red-400 ring-2 ring-red-400/50"
+                                : "bg-red-50/40 text-[#2C1E15] border-2 border-red-300 hover:bg-red-50 ring-1 ring-red-200"
+                              : isSelected
                               ? "bg-[#2C1E15] text-white border-[#2C1E15] shadow-xs ring-2 ring-amber-500/40"
                               : "bg-white text-[#2C1E15] border-[#E6D7C3] hover:border-amber-400 hover:bg-[#FDFBF7]"
                           }`}
@@ -1531,33 +1751,67 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                           <div className="flex items-start gap-2.5 min-w-0">
                             <span
                               className={`w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${
-                                isSelected
+                                isBookedForDates
+                                  ? "bg-red-600 text-white font-black"
+                                  : hasAnyBooking
+                                  ? "bg-red-500 text-white font-black"
+                                  : isSelected
                                   ? "bg-amber-400 text-[#2C1E15]"
                                   : "border border-[#C8B29E] bg-[#FDFBF7]"
                               }`}
                             >
-                              {isSelected ? "✓" : ""}
+                              {isBookedForDates ? "✕" : hasAnyBooking ? "•" : isSelected ? "✓" : ""}
                             </span>
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-1.5 justify-between">
-                                <span className="font-bold text-xs sm:text-sm truncate">{roomUnitName}</span>
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className={`font-bold text-xs sm:text-sm truncate ${isBookedForDates ? "text-red-950 font-black" : ""}`}>
+                                    {roomUnitName}
+                                  </span>
+                                  {isBookedForDates && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-red-600 text-white shadow-xs shrink-0 flex items-center gap-1">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
+                                      Booked
+                                    </span>
+                                  )}
+                                  {!isBookedForDates && hasAnyBooking && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-red-100 text-red-800 border border-red-300 shrink-0">
+                                      Booked
+                                    </span>
+                                  )}
+                                </div>
                                 <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-                                  isSelected ? "bg-amber-900/60 text-amber-200 border border-amber-500/30" : "bg-amber-50 text-amber-900 border border-amber-200"
+                                  isSelected
+                                    ? "bg-amber-900/60 text-amber-200 border border-amber-500/30"
+                                    : isBookedForDates
+                                    ? "bg-red-200/80 text-red-900 border border-red-300"
+                                    : "bg-amber-50 text-amber-900 border border-amber-200"
                                 }`}>
                                   {room.category}
                                 </span>
                               </div>
-                              <span className={`text-[10px] block mt-0.5 font-semibold ${isSelected ? "text-stone-300" : "text-[#786150]"}`}>
+                              <span className={`text-[10px] block mt-0.5 font-semibold ${isSelected ? "text-stone-300" : isBookedForDates ? "text-red-800" : "text-[#786150]"}`}>
                                 {room.id === 'private-villa-pool'
-                                  ? 'Good for 10 Pax'
+                                  ? 'Good for 10 Pax (Max 20 Pax)'
                                   : (room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16')
-                                  ? 'Good for 4 Pax'
+                                  ? `Good for 4–5 Pax (Max ${maxAcc} Pax)`
                                   : (room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10')
-                                  ? 'Good for 3 Pax'
+                                  ? `Good for 3 Pax (Max ${maxAcc} Pax)`
                                   : (room.id === 'room-11')
-                                  ? 'Max 2 Pax (Good for 2)'
-                                  : `Good for ${capText.replace(/^(good for|Good for)\s*/i, '')}`}
+                                  ? `Max ${maxAcc} Pax`
+                                  : `Good for ${capText.replace(/^(good for|Good for)\s*/i, '')} (Max ${maxAcc} Pax)`}
                               </span>
+                              {isBookedForDates ? (
+                                <div className="flex items-center gap-1.5 mt-1 text-[10px] font-bold text-red-700 bg-red-100/90 px-2 py-0.5 rounded-md border border-red-300">
+                                  <AlertCircle className="w-3 h-3 text-red-600 shrink-0" />
+                                  <span>Already Booked for {stayType === 'nightly' ? `${checkInDate} → ${checkOutDate}` : hourlyDate}</span>
+                                </div>
+                              ) : hasAnyBooking ? (
+                                <div className="flex items-center gap-1.5 mt-1 text-[9px] font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-md border border-red-200/60">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0"></span>
+                                  <span className="truncate">Booked on: {bookingInfo.bookedDatesSummary}</span>
+                                </div>
+                              ) : null}
                             </div>
                           </div>
 
@@ -1583,6 +1837,12 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                   onChange={(e) => {
                                     const selectedPax = Number(e.target.value);
                                     handleSetRoomPaxQuantity(room.id, selectedPax);
+                                    if (selectedPax + (roomChildPaxMap[room.id] || 0) > maxAcc) {
+                                      setRoomChildPaxMap((prev) => ({
+                                        ...prev,
+                                        [room.id]: Math.max(0, maxAcc - selectedPax),
+                                      }));
+                                    }
                                   }}
                                   className={`rounded px-1.5 py-0.5 text-xs font-bold outline-none cursor-pointer border ${
                                     isSelected
@@ -1617,7 +1877,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                 </span>
                               </div>
 
-                              {/* Child Pax Selector with Child Rate beside it */}
+                              {/* Child Pax Selector with Child Rate beside it: Pax plus Child Pax up to Max Pax */}
                               <div
                                 onClick={(e) => e.stopPropagation()}
                                 className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs font-semibold transition-all ${
@@ -1625,7 +1885,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                     ? "bg-amber-950/70 border-amber-400/50 text-amber-100"
                                     : "bg-[#FAF7F2] border-[#E6D7C3] text-[#2C1E15]"
                                 }`}
-                                title={`Select Child Pax (6-10 year old) for ${roomUnitName}`}
+                                title={`Select Child Pax (6-10 year old) for ${roomUnitName}. Total max pax is pax plus child pax up to ${maxAcc}.`}
                               >
                                 <span className={`text-[10px] font-bold ${isSelected ? "text-amber-200" : "text-[#786150]"} uppercase`}>
                                   Child - Pax:
@@ -1635,6 +1895,10 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                   onChange={(e) => {
                                     const val = Number(e.target.value);
                                     setRoomChildPaxMap((prev) => ({ ...prev, [room.id]: val }));
+                                    if (currentPaxQuantity + val > maxAcc) {
+                                      const adjustedPax = Math.max(1, maxAcc - val);
+                                      handleSetRoomPaxQuantity(room.id, adjustedPax);
+                                    }
                                   }}
                                   className={`rounded px-1.5 py-0.5 text-xs font-bold outline-none cursor-pointer border ${
                                     isSelected
@@ -1642,15 +1906,38 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                       : "bg-white text-[#2C1E15] border-[#E6D7C3]"
                                   }`}
                                 >
-                                  {[0, 1].map((num) => (
+                                  {Array.from({ length: Math.max(1, maxAcc) }, (_, i) => i).map((num) => (
                                     <option key={num} value={num} className="bg-white text-[#2C1E15]">
-                                      {num}
+                                      {num} {num === 1 ? 'Child' : 'Children'}
                                     </option>
                                   ))}
                                 </select>
                                 <span className={`text-[9.5px] ${isSelected ? "text-amber-300" : "text-[#786150]"} font-medium whitespace-nowrap ml-0.5 pl-1.5 border-l ${isSelected ? "border-amber-400/40" : "border-[#E6D7C3]"}`}>
                                   6-10 years old
                                 </span>
+                              </div>
+
+                              {/* Total Combined Pax Indicator: pax plus child pax until reach to max pax */}
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all ml-auto ${
+                                  currentPaxQuantity + (roomChildPaxMap[room.id] || 0) >= maxAcc
+                                    ? isSelected
+                                      ? "bg-amber-400 text-[#2C1E15] border-amber-300 shadow-2xs"
+                                      : "bg-amber-100 text-amber-950 border-amber-300 shadow-2xs"
+                                    : isSelected
+                                    ? "bg-amber-950/70 border-amber-400/40 text-amber-200"
+                                    : "bg-[#FAF7F2] border-[#E6D7C3] text-[#523A2A]"
+                                }`}
+                                title={`Total occupancy: ${currentPaxQuantity} Pax + ${roomChildPaxMap[room.id] || 0} Child = ${currentPaxQuantity + (roomChildPaxMap[room.id] || 0)} Pax (Max: ${maxAcc})`}
+                              >
+                                <span className="text-[10px] uppercase tracking-wider font-semibold opacity-80">Total:</span>
+                                <span className="font-extrabold">{currentPaxQuantity + (roomChildPaxMap[room.id] || 0)}/{maxAcc} Max Pax</span>
+                                {currentPaxQuantity + (roomChildPaxMap[room.id] || 0) >= maxAcc && (
+                                  <span className="text-[9px] uppercase tracking-wider font-black bg-amber-900 text-amber-100 px-1 py-0.2 rounded">
+                                    Max
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -1785,8 +2072,8 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
 
                                 <div className="flex items-center justify-between text-[11px] text-[#786150] pt-1 border-t border-[#E6D7C3]/40">
                                   <span className="font-medium">
-                                    Adult Pax: <strong className="text-[#2C1E15]">{assignedPax} Adult Pax</strong>{' '}
-                                    <span className="opacity-75">(Max {maxCap})</span>
+                                    Occupancy: <strong className="text-[#2C1E15]">{assignedPax} Pax{roomChildPaxMap[r.id] ? ` + ${roomChildPaxMap[r.id]} Child` : ''}</strong>{' '}
+                                    <span className="opacity-75">({assignedPax + (roomChildPaxMap[r.id] || 0)}/{maxCap} Max)</span>
                                     {extraPaxCount > 0 && (
                                       <span className="ml-1 text-[9px] bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded font-bold">
                                         +{extraPaxCount} Extra
@@ -1807,7 +2094,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                           <div className="flex items-center gap-2">
                             <span className="text-amber-300 font-bold">Total Capacity:</span>
                             <span className="font-medium text-stone-200">
-                              {selectedRooms.reduce((sum, r) => sum + (roomPaxQuantityMap[r.id] || getRoomBaseCapacity(r)), 0)} Guests
+                              {selectedRooms.reduce((sum, r) => sum + (roomPaxQuantityMap[r.id] || getRoomBaseCapacity(r)) + (roomChildPaxMap[r.id] || 0), 0)} Guests
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5">
@@ -2651,9 +2938,9 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                         </div>
 
                         <div className="flex items-center justify-between pt-1.5 border-t border-[#E6D7C3]/50 text-[11px]">
-                          <span className="text-[#786150]">Adult Pax:</span>
+                          <span className="text-[#786150]">Guests (Pax + Child):</span>
                           <span className="font-bold text-amber-900 bg-amber-100/60 px-2 py-0.5 rounded">
-                            {assignedPax} Adult Pax ({maxCap} Pax Max)
+                            {assignedPax} Pax{roomChildPaxMap[room.id] ? ` + ${roomChildPaxMap[room.id]} Child` : ''} ({assignedPax + (roomChildPaxMap[room.id] || 0)}/{maxCap} Max)
                           </span>
                         </div>
                       </div>

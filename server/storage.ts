@@ -23,7 +23,7 @@ const SEED_BOOKINGS: BookingRecord[] = [
     id: 'DV-2026-8941',
     createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
     roomId: 'private-villa-pool',
-    roomTitle: 'Diversion Private Villa Compound (with Swimming Pool)',
+    roomTitle: 'Private Villa (with Swimming Pool)',
     stayType: 'nightly',
     checkInDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
     checkOutDate: new Date(Date.now() + 86400000 * 4).toISOString().split('T')[0],
@@ -55,8 +55,8 @@ const SEED_BOOKINGS: BookingRecord[] = [
   {
     id: 'DV-2026-6204',
     createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-    roomId: 'family-room-rm14',
-    roomTitle: 'Family Room 14 (6-Pax Ground Floor)',
+    roomId: 'room-14',
+    roomTitle: 'Room 14 – Family Room',
     stayType: 'nightly',
     checkInDate: new Date().toISOString().split('T')[0], // Today
     checkOutDate: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
@@ -81,6 +81,59 @@ const SEED_BOOKINGS: BookingRecord[] = [
     specialRequests: 'Extra blankets for children.',
     status: 'Confirmed',
     staffNotes: 'Verified via GCash 09175681408. Room 14 sanitized & keys prepared at front desk.',
+  },
+  {
+    id: 'DV-2026-7818',
+    createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
+    roomId: 'room-18',
+    roomTitle: 'Room 18 – Big Family Room',
+    stayType: 'nightly',
+    checkInDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
+    checkOutDate: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0],
+    numberOfNights: 2,
+    adultGuests: 8,
+    childGuests: 0,
+    addons: [],
+    baseRatePerUnit: 2000,
+    baseStayTotal: 4000,
+    addonsTotal: 0,
+    discountAmount: 0,
+    grandTotal: 4000,
+    paymentOption: 'full',
+    amountPaidNow: 4000,
+    remainingBalance: 0,
+    paymentMethod: 'gcash',
+    guestName: 'Maricel Soriano',
+    guestPhone: '0922 841 9302',
+    guestEmail: 'maricel.soriano@gmail.com',
+    status: 'Confirmed',
+    staffNotes: 'Reserved for Vigan heritage family tour.',
+  },
+  {
+    id: 'DV-2026-5501',
+    createdAt: new Date(Date.now() - 86400000 * 3).toISOString(),
+    roomId: 'room-0',
+    roomTitle: 'Room 0 – Big Family Room',
+    stayType: 'nightly',
+    checkInDate: new Date(Date.now() + 86400000 * 1).toISOString().split('T')[0],
+    checkOutDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
+    numberOfNights: 2,
+    adultGuests: 6,
+    childGuests: 2,
+    addons: [],
+    baseRatePerUnit: 2000,
+    baseStayTotal: 4000,
+    addonsTotal: 0,
+    discountAmount: 0,
+    grandTotal: 4000,
+    paymentOption: 'full',
+    amountPaidNow: 4000,
+    remainingBalance: 0,
+    paymentMethod: 'front_desk',
+    guestName: 'Eduardo Valerio',
+    guestPhone: '0918 332 9941',
+    status: 'Confirmed',
+    staffNotes: 'Direct phone reservation.',
   }
 ];
 
@@ -133,7 +186,12 @@ if (!fs.existsSync(ROOMS_FILE)) {
 export const Storage = {
   // Bookings
   getBookings(): BookingRecord[] {
-    return readJsonFile<BookingRecord[]>(BOOKINGS_FILE, SEED_BOOKINGS);
+    const list = readJsonFile<BookingRecord[]>(BOOKINGS_FILE, SEED_BOOKINGS);
+    if (!list || list.length === 0) {
+      writeJsonFile(BOOKINGS_FILE, SEED_BOOKINGS);
+      return SEED_BOOKINGS;
+    }
+    return list;
   },
 
   saveBookings(bookings: BookingRecord[]): void {
