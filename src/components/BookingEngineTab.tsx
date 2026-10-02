@@ -136,7 +136,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
 
   // Step 3: Add-ons state with quantity map
   const [addonQuantities, setAddonQuantities] = useState<{ [addonId: string]: number }>({
-    extra_pax_all_rooms: 0,
     breakfast_set: 0,
     extra_pad: 0,
     extra_pax: 0,
@@ -148,6 +147,8 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
   const [roomExtraPaxMap, setRoomExtraPaxMap] = useState<{ [roomId: string]: number }>({});
   // Track selected pax quantity per room unit / villa
   const [roomPaxQuantityMap, setRoomPaxQuantityMap] = useState<{ [roomId: string]: number }>({});
+  // Track selected child pax quantity (6-10 years old) per room unit
+  const [roomChildPaxMap, setRoomChildPaxMap] = useState<{ [roomId: string]: number }>({});
 
   // Step 4: Guest Contact Details & Registration
   const [guestName, setGuestName] = useState<string>('');
@@ -283,15 +284,18 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     // Sun to Thu: 0, 1, 2, 3, 4 | Fri to Sat: 5, 6
     const isWeekend = day === 5 || day === 6;
 
+    const effectiveKids6to10 = roomChildPaxMap[room.id] !== undefined ? roomChildPaxMap[room.id] : kids6to10;
+
     if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
       // Mon to Fri: 1, 2, 3, 4, 5 (Monday to Friday) -> ₱8,000 base (1-10 pax)
       // Sat to Sun: 6, 0 (Saturday to Sunday) -> ₱10,000 base (1-10 pax)
       const isSatSun = day === 6 || day === 0;
+      const isFriSatSun = day === 5 || day === 6 || day === 0;
       const baseVillaRate = isSatSun ? 10000 : 8000;
 
       // 3 yrs below (sneak-in) are free of charge
       const effectiveAdults = roomPaxQuantityMap[room.id] ? roomPaxQuantityMap[room.id] : adults;
-      const effectiveKids = roomPaxQuantityMap[room.id] ? 0 : kids6to10;
+      const effectiveKids = roomPaxQuantityMap[room.id] ? effectiveKids6to10 : effectiveKids6to10;
 
       let extraAdultFee = 0;
       let extraChildFee = 0;
@@ -300,6 +304,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
         const totalPax = roomPaxQuantityMap[room.id];
         const extraPax = Math.max(0, totalPax - 10);
         extraAdultFee = extraPax * 500;
+        extraChildFee = effectiveKids * (isFriSatSun ? 400 : 300);
       } else {
         const totalCount = effectiveAdults + effectiveKids;
         if (totalCount > 10) {
@@ -307,11 +312,11 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
             const extraAdults = effectiveAdults - 10;
             const extraKids = effectiveKids;
             extraAdultFee = extraAdults * 500;
-            extraChildFee = extraKids * (isSatSun ? 500 : 400);
+            extraChildFee = extraKids * (isFriSatSun ? 400 : 300);
           } else {
             const baseKidsCount = 10 - effectiveAdults;
             const extraKids = Math.max(0, effectiveKids - baseKidsCount);
-            extraChildFee = extraKids * (isSatSun ? 500 : 400);
+            extraChildFee = extraKids * (isFriSatSun ? 400 : 300);
           }
         }
       }
@@ -339,7 +344,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     // 1-5 yrs: Free
     // 6-10 yrs: P200 Per Pax (Sun-Thu) | P250 Per Pax (Fri-Sat)
     const child6to10Rate = isWeekend ? 250 : 200;
-    const additionalKidsFee = kids6to10 * child6to10Rate;
+    const additionalKidsFee = effectiveKids6to10 * child6to10Rate;
 
     return baseRate + additionalKidsFee;
   };
@@ -525,76 +530,78 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     }
   }, [stayType, nightlyBreakdown, checkInDate, hourlyDate]);
 
-  // Dynamic single-pax rate info for Private Villa Extra Child Pax based on calendar date day (Monday to Friday ₱400, Saturday to Sunday ₱500)
+  // Dynamic single-pax rate info for Private Villa Extra Child Pax based on calendar date day (Monday to Thursday ₱300, Friday to Sunday ₱400)
   const extraPaxChildVillaRateInfo = useMemo(() => {
-    const weekdayRate = 400; // Monday to Friday
-    const weekendRate = 500; // Saturday to Sunday
+    const weekdayRate = 300; // Monday to Thursday
+    const weekendRate = 400; // Friday to Sunday
 
     if (stayType === 'nightly') {
       if (nightlyBreakdown.length > 0) {
-        const satSunCount = nightlyBreakdown.filter((n) => {
+        const friSatSunCount = nightlyBreakdown.filter((n) => {
           const d = new Date(n.dateStr).getDay();
-          return d === 6 || d === 0;
+          return d === 5 || d === 6 || d === 0;
         }).length;
-        const monFriCount = nightlyBreakdown.length - satSunCount;
+        const monThuCount = nightlyBreakdown.length - friSatSunCount;
 
-        if (satSunCount === nightlyBreakdown.length) {
+        if (friSatSunCount === nightlyBreakdown.length) {
           return {
             rate: weekendRate,
             unitLabel: `₱${weekendRate.toLocaleString()} / child / night`,
-            dayDesc: 'Saturday to Sunday rate (₱500)',
-            fullLabel: `₱${weekendRate.toLocaleString()} / night (${satSunCount} Weekend nights)`,
+            dayDesc: 'Friday to Sunday rate (₱400)',
+            fullLabel: `₱${weekendRate.toLocaleString()} / night (${friSatSunCount} Fri–Sun nights)`,
             isMixed: false,
           };
         }
 
-        if (monFriCount === nightlyBreakdown.length) {
+        if (monThuCount === nightlyBreakdown.length) {
           return {
             rate: weekdayRate,
             unitLabel: `₱${weekdayRate.toLocaleString()} / child / night`,
-            dayDesc: 'Monday to Friday rate (₱400)',
-            fullLabel: `₱${weekdayRate.toLocaleString()} / night (${monFriCount} Mon–Fri nights)`,
+            dayDesc: 'Monday to Thursday rate (₱300)',
+            fullLabel: `₱${weekdayRate.toLocaleString()} / night (${monThuCount} Mon–Thu nights)`,
             isMixed: false,
           };
         }
 
         const totalPerChild = nightlyBreakdown.reduce((sum, n) => {
           const d = new Date(n.dateStr).getDay();
-          const isSatSun = d === 6 || d === 0;
-          return sum + (isSatSun ? weekendRate : weekdayRate);
+          const isFriSatSun = d === 5 || d === 6 || d === 0;
+          return sum + (isFriSatSun ? weekendRate : weekdayRate);
         }, 0);
 
         return {
           rate: totalPerChild,
-          unitLabel: `₱${weekdayRate.toLocaleString()} (Mon–Fri) & ₱${weekendRate.toLocaleString()} (Sat–Sun)`,
-          dayDesc: `${monFriCount}x Mon–Fri (@₱${weekdayRate.toLocaleString()}) + ${satSunCount}x Sat–Sun (@₱${weekendRate.toLocaleString()})`,
-          fullLabel: `₱${totalPerChild.toLocaleString()} per child (${nightlyBreakdown.length} nights: ${monFriCount}x ₱${weekdayRate.toLocaleString()} + ${satSunCount}x ₱${weekendRate.toLocaleString()})`,
+          unitLabel: `₱${weekdayRate.toLocaleString()} (Mon–Thu) & ₱${weekendRate.toLocaleString()} (Fri–Sun)`,
+          dayDesc: `${monThuCount}x Mon–Thu (@₱${weekdayRate.toLocaleString()}) + ${friSatSunCount}x Fri–Sun (@₱${weekendRate.toLocaleString()})`,
+          fullLabel: `₱${totalPerChild.toLocaleString()} per child (${nightlyBreakdown.length} nights: ${monThuCount}x ₱${weekdayRate.toLocaleString()} + ${friSatSunCount}x ₱${weekendRate.toLocaleString()})`,
           isMixed: true,
         };
       }
 
       const parts = checkInDate.split('-').map(Number);
       const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(checkInDate);
-      const isSatSun = d.getDay() === 6 || d.getDay() === 0;
-      const rate = isSatSun ? weekendRate : weekdayRate;
+      const day = d.getDay();
+      const isFriSatSun = day === 5 || day === 6 || day === 0;
+      const rate = isFriSatSun ? weekendRate : weekdayRate;
       const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
       return {
         rate,
         unitLabel: `₱${rate.toLocaleString()} / child / night`,
-        dayDesc: isSatSun ? `${dayName} (Saturday to Sunday rate ₱500)` : `${dayName} (Monday to Friday rate ₱400)`,
+        dayDesc: isFriSatSun ? `${dayName} (Friday to Sunday rate ₱400)` : `${dayName} (Monday to Thursday rate ₱300)`,
         fullLabel: `₱${rate.toLocaleString()} / night (${dayName})`,
         isMixed: false,
       };
     } else {
       const parts = hourlyDate.split('-').map(Number);
       const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(hourlyDate);
-      const isSatSun = d.getDay() === 6 || d.getDay() === 0;
-      const rate = isSatSun ? weekendRate : weekdayRate;
+      const day = d.getDay();
+      const isFriSatSun = day === 5 || day === 6 || day === 0;
+      const rate = isFriSatSun ? weekendRate : weekdayRate;
       const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
       return {
         rate,
         unitLabel: `₱${rate.toLocaleString()} / child`,
-        dayDesc: isSatSun ? `${dayName} (Saturday to Sunday rate ₱500)` : `${dayName} (Monday to Friday rate ₱400)`,
+        dayDesc: isFriSatSun ? `${dayName} (Friday to Sunday rate ₱400)` : `${dayName} (Monday to Thursday rate ₱300)`,
         fullLabel: `₱${rate.toLocaleString()} / child (${dayName})`,
         isMixed: false,
       };
@@ -605,27 +612,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
   const getAddonCost = useCallback(
     (addon: BookingAddonItem, qty: number) => {
       if (qty <= 0) return 0;
-      if (addon.id === 'extra_pax_all_rooms') {
-        const weekdayRate = 300;
-        const weekendRate = 350;
-        if (stayType === 'nightly') {
-          if (nightlyBreakdown.length > 0) {
-            return nightlyBreakdown.reduce((sum, item) => {
-              const dayRate = item.isWeekend ? weekendRate : weekdayRate;
-              return sum + dayRate * qty;
-            }, 0);
-          }
-          const parts = checkInDate.split('-').map(Number);
-          const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(checkInDate);
-          const isW = d.getDay() === 5 || d.getDay() === 6;
-          return (isW ? weekendRate : weekdayRate) * qty * calculatedNights;
-        } else {
-          const parts = hourlyDate.split('-').map(Number);
-          const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(hourlyDate);
-          const isW = d.getDay() === 5 || d.getDay() === 6;
-          return (isW ? weekendRate : weekdayRate) * qty;
-        }
-      }
       if (addon.id === 'extra_pax_adult_villa') {
         // Monday to Friday: ₱500 / night, Saturday to Sunday: ₱500 / night
         const adultRate = 500;
@@ -636,27 +622,29 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
         }
       }
       if (addon.id === 'extra_pax_child_villa') {
-        // Monday to Friday: ₱400 / night, Saturday to Sunday: ₱500 / night
-        const weekdayRate = 400;
-        const weekendRate = 500;
+        // Monday to Thursday: ₱300 / night, Friday to Sunday: ₱400 / night
+        const weekdayRate = 300;
+        const weekendRate = 400;
         if (stayType === 'nightly') {
           if (nightlyBreakdown.length > 0) {
             return nightlyBreakdown.reduce((sum, item) => {
               const d = new Date(item.dateStr).getDay();
-              const isSatSun = d === 6 || d === 0;
-              const childRate = isSatSun ? weekendRate : weekdayRate;
+              const isFriSatSun = d === 5 || d === 6 || d === 0;
+              const childRate = isFriSatSun ? weekendRate : weekdayRate;
               return sum + childRate * qty;
             }, 0);
           }
           const parts = checkInDate.split('-').map(Number);
           const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(checkInDate);
-          const isSatSun = d.getDay() === 6 || d.getDay() === 0;
-          return (isSatSun ? weekendRate : weekdayRate) * qty * calculatedNights;
+          const day = d.getDay();
+          const isFriSatSun = day === 5 || day === 6 || day === 0;
+          return (isFriSatSun ? weekendRate : weekdayRate) * qty * calculatedNights;
         } else {
           const parts = hourlyDate.split('-').map(Number);
           const d = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : new Date(hourlyDate);
-          const isSatSun = d.getDay() === 6 || d.getDay() === 0;
-          return (isSatSun ? weekendRate : weekdayRate) * qty;
+          const day = d.getDay();
+          const isFriSatSun = day === 5 || day === 6 || day === 0;
+          return (isFriSatSun ? weekendRate : weekdayRate) * qty;
         }
       }
       if (addon.id === 'extra_pax_infant_villa') {
@@ -720,7 +708,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
       return 10;
     }
-    const eligible1 = ['0', '1', '4', '5', '6', '7', '8', '9', '10', '12', '13', '14', '15', '16'];
+    const eligible1 = ['0', '1', '4', '5', '6', '7', '8', '9', '10', '12', '13', '14', '15', '16', '18'];
     const eligible2 = ['11', '2', '3'];
     const match = (room.roomNumber || room.title).match(/\d+/);
     const numStr = match ? match[0] : room.id.replace('room-', '');
@@ -734,7 +722,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
       return 10;
     }
-    if (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-7') return 8;
+    if (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-18' || room.id === 'room-7') return 8;
     if (room.id === 'room-2' || room.id === 'room-3') return 10;
     if (room.id === 'room-4' || room.id === 'room-5' || room.id === 'room-6') return 7;
     if (room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16') return 5;
@@ -781,15 +769,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
         setSelectedRoomNumberFilter(roomId);
       }
 
-      const totalExtraPax = Object.entries(updated).reduce((sum, [id, count]) => {
-        return activeRoomIds.includes(id) ? sum + count : sum;
-      }, 0);
-
-      setAddonQuantities((prevAddons) => ({
-        ...prevAddons,
-        extra_pax_all_rooms: totalExtraPax,
-      }));
-
       return updated;
     });
   };
@@ -825,15 +804,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
         setSelectedRoomNumberFilter(roomId);
       }
 
-      const totalExtraPax = Object.entries(updated).reduce((sum, [id, count]) => {
-        return activeRoomIds.includes(id) ? sum + count : sum;
-      }, 0);
-
-      setAddonQuantities((prevAddons) => ({
-        ...prevAddons,
-        extra_pax_all_rooms: totalExtraPax,
-      }));
-
       return updated;
     });
   };
@@ -862,6 +832,28 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
       setSlipFile(file);
       const preview = URL.createObjectURL(file);
       setSlipPreviewUrl(preview);
+
+      // Read file and upload permanently to backend server
+      const reader = new FileReader();
+      reader.onload = async (ev) => {
+        const base64 = ev.target?.result as string;
+        if (base64) {
+          try {
+            const res = await fetch('/api/upload', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: base64, name: file.name, folder: 'slip' })
+            });
+            const data = await res.json();
+            if (data.success && data.url) {
+              setSlipPreviewUrl(data.url);
+            }
+          } catch (uploadErr) {
+            console.error('Failed to permanently store slip image:', uploadErr);
+          }
+        }
+      };
+      reader.readAsDataURL(file);
       
       if (formErrors.paymentSlip) {
         setFormErrors((prev) => {
@@ -876,7 +868,9 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
   const handleRemoveSlip = () => {
     setSlipFile(null);
     if (slipPreviewUrl) {
-      URL.revokeObjectURL(slipPreviewUrl);
+      if (slipPreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(slipPreviewUrl);
+      }
       setSlipPreviewUrl(null);
     }
     if (fileInputRef.current) {
@@ -1016,7 +1010,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
   }, [calendarViewDate]);
 
   // Handle Form Submission
-  const handleSubmitBooking = (e: React.FormEvent) => {
+  const handleSubmitBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     const errors: { [key: string]: string } = {};
 
@@ -1047,6 +1041,31 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     }
 
     setFormErrors({});
+
+    // Ensure slip URL is permanently saved to server
+    let finalSlipUrl = slipPreviewUrl || undefined;
+    if (slipFile && (!finalSlipUrl || finalSlipUrl.startsWith('blob:'))) {
+      try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(slipFile);
+        });
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64, name: slipFile.name, folder: 'slip' }),
+        });
+        const uploadData = await uploadRes.json();
+        if (uploadData.success && uploadData.url) {
+          finalSlipUrl = uploadData.url;
+          setSlipPreviewUrl(uploadData.url);
+        }
+      } catch (err) {
+        console.error('Permanent slip upload error:', err);
+      }
+    }
 
     const formattedRoomTitle = selectedRoomsGrouped.length > 0
       ? selectedRoomsGrouped
@@ -1092,7 +1111,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
       amountPaidNow: amountPayableNow,
       remainingBalance: remainingBalance,
       paymentMethod: paymentMethod,
-      paymentSlipUrl: slipPreviewUrl || undefined,
+      paymentSlipUrl: finalSlipUrl,
       paymentSlipFileName: slipFile?.name || 'payment_slip.jpg',
       guestName: guestName.trim(),
       guestPhone: guestPhone.trim(),
@@ -1409,7 +1428,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                         Accommodation Unit (All Rooms) — Multiple Choices Allowed
                       </label>
                       <p className="text-[11px] text-[#786150]">
-                        Click or tap any room box below to select multiple accommodation units
+                        Choose your pax and click the room number to see the actual rate
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -1428,9 +1447,9 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                             setSelectedRoomNumberFilter('');
                             setRoomExtraPaxMap({});
                             setRoomPaxQuantityMap({});
+                            setRoomChildPaxMap({});
                             setAddonQuantities((prev) => ({
                               ...prev,
-                              extra_pax_all_rooms: 0,
                             }));
                           }}
                           className="text-[11px] font-bold text-[#786150] hover:text-[#2C1E15] bg-stone-100 hover:bg-stone-200 px-2.5 py-1 rounded-lg border border-stone-300/60 transition-colors cursor-pointer"
@@ -1446,7 +1465,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                     {rooms.map((room) => {
                       const isSelected = selectedRoomIds.includes(room.id);
                       const roomUnitName = room.roomNumber || room.title.split("–")[0].trim();
-                      const capText = (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-7')
+                      const capText = (room.id === 'room-0' || room.id === 'room-1' || room.id === 'room-12' || room.id === 'room-18' || room.id === 'room-7')
                         ? '8 Pax'
                         : (room.id === 'room-2' || room.id === 'room-3')
                         ? '10 Pax'
@@ -1478,6 +1497,13 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                               return updated;
                             });
                           }
+                          if (roomChildPaxMap[room.id]) {
+                            setRoomChildPaxMap((prev) => {
+                              const updated = { ...prev };
+                              delete updated[room.id];
+                              return updated;
+                            });
+                          }
                         } else {
                           setSelectedRoomIds([...selectedRoomIds, room.id]);
                           setSelectedRoomNumberFilter(room.id);
@@ -1496,13 +1522,13 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                               toggleRoomSelection();
                             }
                           }}
-                          className={`w-full p-2.5 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between gap-2 select-none shadow-2xs ${
+                          className={`w-full p-3 rounded-xl text-left border transition-all cursor-pointer flex flex-col justify-between gap-2.5 select-none shadow-2xs ${
                             isSelected
                               ? "bg-[#2C1E15] text-white border-[#2C1E15] shadow-xs ring-2 ring-amber-500/40"
                               : "bg-white text-[#2C1E15] border-[#E6D7C3] hover:border-amber-400 hover:bg-[#FDFBF7]"
                           }`}
                         >
-                          <div className="flex items-start gap-2 min-w-0">
+                          <div className="flex items-start gap-2.5 min-w-0">
                             <span
                               className={`w-4 h-4 rounded flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5 ${
                                 isSelected
@@ -1521,86 +1547,35 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                   {room.category}
                                 </span>
                               </div>
-
-                              <div className="flex flex-wrap items-center gap-1 mt-1">
-                                <span className={`text-[10px] font-semibold ${isSelected ? "text-stone-300" : "text-[#786150]"}`}>
-                                  {room.id === 'private-villa-pool'
-                                    ? 'good for 10 Pax'
-                                    : (room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16')
-                                    ? 'good for 4 Pax'
-                                    : (room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10')
-                                    ? 'Good for 3 Pax'
-                                    : (room.id === 'room-11')
-                                    ? 'Max 2 Pax (Good for 2)'
-                                    : `Good for ${capText.replace(/^(good for|Good for)\s*/i, '')}`}
-                                </span>
-
-                                {/* Feature: Extra Pax with Max to add according to specified data */}
-                                {maxExtraPax === 1 ? (
-                                  <span
-                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-0.5 transition-all ${
-                                      currentRoomExtraPax > 0
-                                        ? isSelected
-                                          ? "bg-amber-400 text-[#2C1E15]"
-                                          : "bg-emerald-600 text-white"
-                                        : isSelected
-                                        ? "bg-amber-950/80 text-amber-200 border border-amber-400/40"
-                                        : "bg-amber-100/80 text-amber-900 border border-amber-300/80"
-                                    }`}
-                                  >
-                                    <span>{currentRoomExtraPax > 0 ? "✓ +1 Extra" : "+1 Extra"}</span>
-                                    <span className="opacity-80 font-normal text-[8.5px]">(Max 1)</span>
-                                  </span>
-                                ) : maxExtraPax === 2 ? (
-                                  <span
-                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-0.5 transition-all ${
-                                      currentRoomExtraPax > 0
-                                        ? isSelected
-                                          ? "bg-amber-400 text-[#2C1E15]"
-                                          : "bg-emerald-600 text-white"
-                                        : isSelected
-                                        ? "bg-purple-950/80 text-purple-200 border border-purple-400/40"
-                                        : "bg-purple-100/80 text-purple-900 border border-purple-300/80"
-                                    }`}
-                                  >
-                                    <span>{currentRoomExtraPax > 0 ? `✓ +${currentRoomExtraPax} Extra` : "+2 Extra"}</span>
-                                    <span className="opacity-80 font-normal text-[8.5px]">(Max 2)</span>
-                                  </span>
-                                ) : maxExtraPax === 10 ? (
-                                  <span
-                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold inline-flex items-center gap-0.5 transition-all ${
-                                      currentRoomExtraPax > 0
-                                        ? isSelected
-                                          ? "bg-amber-400 text-[#2C1E15]"
-                                          : "bg-emerald-600 text-white"
-                                        : isSelected
-                                        ? "bg-amber-950/80 text-amber-200 border border-amber-400/40"
-                                        : "bg-amber-100/80 text-amber-900 border border-amber-300/80"
-                                    }`}
-                                  >
-                                    <span>{currentRoomExtraPax > 0 ? `✓ +${currentRoomExtraPax} Extra` : "+1 Extra"}</span>
-                                    <span className="opacity-80 font-normal text-[8.5px]">(Max 10)</span>
-                                  </span>
-                                ) : null}
-                              </div>
+                              <span className={`text-[10px] block mt-0.5 font-semibold ${isSelected ? "text-stone-300" : "text-[#786150]"}`}>
+                                {room.id === 'private-villa-pool'
+                                  ? 'Good for 10 Pax'
+                                  : (room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16')
+                                  ? 'Good for 4 Pax'
+                                  : (room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10')
+                                  ? 'Good for 3 Pax'
+                                  : (room.id === 'room-11')
+                                  ? 'Max 2 Pax (Good for 2)'
+                                  : `Good for ${capText.replace(/^(good for|Good for)\s*/i, '')}`}
+                              </span>
                             </div>
                           </div>
 
-                          {/* Card Footer: Interactive Controls & Price */}
-                          <div className="pt-2 border-t border-[#E6D7C3]/50 flex flex-col gap-1.5">
-                            <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                              {/* Pax Quantity Option Depending on Max Accommodation */}
+                          {/* Card Footer: Pax / Occupancy Selector inside each room card */}
+                          <div className="pt-2 border-t border-[#E6D7C3]/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-wrap w-full">
+                              {/* Pax Selector with Pax Rate beside it */}
                               <div
                                 onClick={(e) => e.stopPropagation()}
-                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-lg border text-xs font-semibold transition-all ${
+                                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs font-semibold transition-all ${
                                   isSelected
                                     ? "bg-amber-950/70 border-amber-400/50 text-amber-100"
-                                    : "bg-[#FAF7F2] border-[#E6D7C3] hover:border-amber-400 text-[#2C1E15]"
+                                    : "bg-[#FAF7F2] border-[#E6D7C3] text-[#2C1E15]"
                                 }`}
-                                title={`Select Pax Quantity for ${roomUnitName} (Max Accommodation: ${maxAcc} Pax)`}
+                                title={`Select Pax / Occupancy for ${roomUnitName}`}
                               >
-                                <Users className={`w-3 h-3 ${isSelected ? "text-amber-300" : "text-amber-800"} shrink-0`} />
-                                <span className={`text-[9.5px] font-bold ${isSelected ? "text-amber-200" : "text-[#786150]"} uppercase shrink-0`}>
+                                <Users className={`w-3.5 h-3.5 ${isSelected ? "text-amber-300" : "text-amber-800"} shrink-0`} />
+                                <span className={`text-[10px] font-bold ${isSelected ? "text-amber-200" : "text-[#786150]"} uppercase`}>
                                   Pax:
                                 </span>
                                 <select
@@ -1609,97 +1584,74 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                     const selectedPax = Number(e.target.value);
                                     handleSetRoomPaxQuantity(room.id, selectedPax);
                                   }}
-                                  className={`rounded px-1 py-0.5 text-[10.5px] font-bold outline-none cursor-pointer border ${
+                                  className={`rounded px-1.5 py-0.5 text-xs font-bold outline-none cursor-pointer border ${
                                     isSelected
-                                      ? "bg-[#2C1E15] text-amber-200 border-amber-500/40 focus:ring-1 focus:ring-amber-400"
-                                      : "bg-white text-[#2C1E15] border-[#E6D7C3] focus:ring-1 focus:ring-amber-500"
+                                      ? "bg-[#2C1E15] text-amber-200 border-amber-500/40"
+                                      : "bg-white text-[#2C1E15] border-[#E6D7C3]"
                                   }`}
                                 >
-                                  {Array.from({ length: maxAcc }, (_, i) => i + 1).map((paxNum) => {
-                                    const isExtra = paxNum > baseCap;
-                                    return (
-                                      <option key={paxNum} value={paxNum} className="bg-white text-[#2C1E15]">
-                                        {paxNum} Pax
-                                      </option>
-                                    );
-                                  })}
+                                  {Array.from({ length: maxAcc }, (_, i) => i + 1).map((paxNum) => (
+                                    <option key={paxNum} value={paxNum} className="bg-white text-[#2C1E15]">
+                                      {paxNum} Pax
+                                    </option>
+                                  ))}
                                 </select>
-                              </div>
+                                <span className={`text-[11px] font-mono font-bold ml-1 pl-1.5 border-l ${isSelected ? "border-amber-400/40 text-amber-300" : "border-[#E6D7C3] text-[#2C1E15]"}`}>
+                                  {(() => {
+                                    const isW = nightlyBreakdown.length > 0 ? nightlyBreakdown[0].isWeekend : false;
+                                    let calculatedRate = room.pricing?.nightly || 1000;
 
-                              {isEligibleForExtraPax && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleToggleRoomExtraPax(room.id, maxExtraPax);
-                                  }}
-                                  className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded-lg border transition-all cursor-pointer flex items-center gap-0.5 ${
-                                    currentRoomExtraPax > 0
-                                      ? isSelected
-                                        ? "bg-amber-400 text-[#2C1E15] border-amber-500 shadow-xs"
-                                        : "bg-emerald-600 text-white border-emerald-700 shadow-xs"
-                                      : isSelected
-                                      ? "bg-white/10 text-amber-200 border-amber-400/40 hover:bg-white/20"
-                                      : "bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-200"
-                                  }`}
-                                  title={`Add Extra Pax for this room (Max to add: ${maxExtraPax})`}
-                                >
-                                  <span>
-                                    {maxExtraPax === 1
-                                      ? currentRoomExtraPax > 0
-                                        ? "✓ Extra (1/1)"
-                                        : "+ Extra Pax"
-                                      : maxExtraPax === 2
-                                      ? currentRoomExtraPax === 0
-                                        ? "+ Extra Pax"
-                                        : currentRoomExtraPax === 1
-                                        ? "✓ 1 Extra (+2nd)"
-                                        : "✓ Extra (2/2)"
-                                      : currentRoomExtraPax === 0
-                                      ? "+ Extra Pax"
-                                      : currentRoomExtraPax < 10
-                                      ? `✓ +${currentRoomExtraPax} Extra`
-                                      : "✓ Extra (10/10)"}
-                                  </span>
-                                </button>
-                              )}
-                            </div>
+                                    if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
+                                      const checkDay = nightlyBreakdown.length > 0 ? new Date(nightlyBreakdown[0].dateStr).getDay() : new Date().getDay();
+                                      const isSatSun = checkDay === 6 || checkDay === 0;
+                                      const baseVilla = isSatSun ? 10000 : 8000;
+                                      const extraPax = Math.max(0, currentPaxQuantity - 10);
+                                      calculatedRate = baseVilla + extraPax * 500;
+                                    } else if (room.paxRates && room.paxRates.length > 0) {
+                                      const tier = room.paxRates.find((t) => currentPaxQuantity <= t.pax) || room.paxRates[room.paxRates.length - 1];
+                                      calculatedRate = isW ? tier.weekendRate : tier.weekdayRate;
+                                    }
 
-                            {/* Price Breakdown */}
-                            <div className="flex items-baseline justify-between pt-1 border-t border-[#E6D7C3]/30">
-                              <div className="flex flex-col min-w-0">
-                                <span className={`text-[9px] font-medium ${isSelected ? "text-stone-300" : "text-[#786150]"}`}>
-                                  {currentPaxQuantity} Pax Rate:
+                                    return `₱${calculatedRate.toLocaleString()}/night`;
+                                  })()}
                                 </span>
-                                {(room.id === 'room-8' || room.id === 'room-9' || room.id === 'room-10' || room.id === 'room-11' || room.id === 'room-14' || room.id === 'room-15' || room.id === 'room-16') && (
-                                  <span className={`text-[8.5px] font-semibold truncate ${isSelected ? "text-amber-200/90" : "text-[#8B6B10]"}`}>
-                                    {room.id === 'room-11'
-                                      ? `${room.weekdayRateDisplay} • ${room.weekendRateDisplay}`
-                                      : `${room.weekdayRateDisplay} (Mon-Thu, Sun) • ${room.weekendRateDisplay} (Fri-Sat)`}
-                                  </span>
-                                )}
                               </div>
-                              {(() => {
-                                const isW = nightlyBreakdown.length > 0 ? nightlyBreakdown[0].isWeekend : false;
-                                let calculatedRate = room.pricing?.nightly || 1000;
 
-                                if (room.id === 'private-villa-pool' || (room.roomNumber || room.title).toLowerCase().includes('private villa')) {
-                                  const checkDay = nightlyBreakdown.length > 0 ? new Date(nightlyBreakdown[0].dateStr).getDay() : new Date().getDay();
-                                  const isSatSun = checkDay === 6 || checkDay === 0;
-                                  const baseVilla = isSatSun ? 10000 : 8000;
-                                  const extraPax = Math.max(0, currentPaxQuantity - 10);
-                                  calculatedRate = baseVilla + extraPax * 500;
-                                } else if (room.paxRates && room.paxRates.length > 0) {
-                                  const tier = room.paxRates.find((t) => currentPaxQuantity <= t.pax) || room.paxRates[room.paxRates.length - 1];
-                                  calculatedRate = isW ? tier.weekendRate : tier.weekdayRate;
-                                }
-
-                                return (
-                                  <span className={`font-bold text-xs sm:text-sm font-mono ${isSelected ? "text-amber-300" : "text-[#2C1E15]"}`}>
-                                    ₱{calculatedRate.toLocaleString()}<span className="text-[9.5px] font-normal opacity-80">/night</span>
-                                  </span>
-                                );
-                              })()}
+                              {/* Child Pax Selector with Child Rate beside it */}
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs font-semibold transition-all ${
+                                  isSelected
+                                    ? "bg-amber-950/70 border-amber-400/50 text-amber-100"
+                                    : "bg-[#FAF7F2] border-[#E6D7C3] text-[#2C1E15]"
+                                }`}
+                                title={`Select Child Pax (6-10 year old) for ${roomUnitName}`}
+                              >
+                                <span className={`text-[10px] font-bold ${isSelected ? "text-amber-200" : "text-[#786150]"} uppercase`}>
+                                  Child - Pax:
+                                </span>
+                                <select
+                                  value={roomChildPaxMap[room.id] || 0}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setRoomChildPaxMap((prev) => ({ ...prev, [room.id]: val }));
+                                  }}
+                                  className={`rounded px-1.5 py-0.5 text-xs font-bold outline-none cursor-pointer border ${
+                                    isSelected
+                                      ? "bg-[#2C1E15] text-amber-200 border-amber-500/40"
+                                      : "bg-white text-[#2C1E15] border-[#E6D7C3]"
+                                  }`}
+                                >
+                                  {[0, 1].map((num) => (
+                                    <option key={num} value={num} className="bg-white text-[#2C1E15]">
+                                      {num}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className={`text-[9.5px] ${isSelected ? "text-amber-300" : "text-[#786150]"} font-medium whitespace-nowrap ml-0.5 pl-1.5 border-l ${isSelected ? "border-amber-400/40" : "border-[#E6D7C3]"}`}>
+                                  6-10 years old
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1920,9 +1872,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                         selectedRooms.length > 0 && !hasPrivateVillaSelected;
 
                       const displayedAddons = availableAddons.filter((addon) => {
-                        if (addon.id === 'extra_pax_all_rooms') {
-                          return !isOnlyPrivateVillaSelected;
-                        }
                         if (
                           addon.id === 'extra_pax_adult_villa' ||
                           addon.id === 'extra_pax_child_villa' ||
@@ -1936,7 +1885,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                       return displayedAddons.map((addon) => {
                         const qty = addonQuantities[addon.id] || 0;
                         const calculatedCost = getAddonCost(addon, qty);
-                        const isExtraPaxAll = addon.id === 'extra_pax_all_rooms';
                         const isVillaAdult = addon.id === 'extra_pax_adult_villa';
                         const isVillaChild = addon.id === 'extra_pax_child_villa';
                         const isVillaInfant = addon.id === 'extra_pax_infant_villa';
@@ -1945,11 +1893,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                         let badgeClass = 'bg-[#F5EBE6] text-amber-800';
                         let descText = addon.description;
 
-                        if (isExtraPaxAll) {
-                          badgeText = extraPaxCalendarRateInfo.unitLabel;
-                          badgeClass = 'bg-amber-100 text-amber-900 border border-amber-300 font-bold';
-                          descText = `Current rate for selected calendar date (${extraPaxCalendarRateInfo.dayDesc}): Sunday to Monday ₱300, Friday to Saturday ₱350.`;
-                        } else if (isVillaAdult) {
+                        if (isVillaAdult) {
                           badgeText = 'Mon–Fri ₱500 • Sat–Sun ₱500';
                           badgeClass = 'bg-amber-100 text-amber-950 border border-amber-300 font-bold';
                           descText = 'Private Villa Extra Pax (Adult): Monday to Friday ₱500 / night, Saturday to Sunday ₱500 / night.';
@@ -1977,9 +1921,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                               </p>
                               {qty > 0 && (
                                 <div className="text-[11px] font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md inline-block mt-1 border border-amber-200">
-                                  {isExtraPaxAll && (
-                                    <span>Total for Stay: ₱{calculatedCost.toLocaleString()} ({qty} Extra Pax • {extraPaxCalendarRateInfo.fullLabel})</span>
-                                  )}
                                   {isVillaAdult && (
                                     <span>Total for Stay: ₱{calculatedCost.toLocaleString()} ({qty} Extra Adult • ₱500/night)</span>
                                   )}
@@ -1989,7 +1930,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                   {isVillaInfant && (
                                     <span className="text-emerald-800">Free of charge sneak-in ({qty} Infant / Toddler 3 yrs & below)</span>
                                   )}
-                                  {!isExtraPaxAll && !isVillaAdult && !isVillaChild && !isVillaInfant && (
+                                  {!isVillaAdult && !isVillaChild && !isVillaInfant && (
                                     <span>Total: ₱{calculatedCost.toLocaleString()} ({qty}x {addon.name})</span>
                                   )}
                                 </div>
@@ -2759,13 +2700,45 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                       else roomCost += room.pricing.hourly12hr || 1100;
                     }
 
+                    const childPax = roomChildPaxMap[room.id] || 0;
+                    let totalChildCostForRoom = 0;
+                    if (stayType === "nightly" && childPax > 0) {
+                      const start = new Date(checkInDate);
+                      const end = new Date(checkOutDate);
+                      const cur = new Date(start);
+                      while (cur < end) {
+                        const day = cur.getDay();
+                        const isW = day === 5 || day === 6;
+                        const childRate = isW ? 250 : 200;
+                        totalChildCostForRoom += childPax * childRate;
+                        cur.setDate(cur.getDate() + 1);
+                      }
+                      if (start >= end) {
+                        const day = start.getDay();
+                        const isW = day === 5 || day === 6;
+                        const childRate = isW ? 250 : 200;
+                        totalChildCostForRoom += childPax * childRate;
+                      }
+                    }
+                    const adultRoomCost = Math.max(0, roomCost - totalChildCostForRoom);
+
                     return (
-                      <div key={`ind-room-cost-${room.id}-${idx}`} className="flex items-center justify-between text-[11px] text-[#523A2A]">
-                        <span className="font-medium">
-                          {roomUnitName} ({assignedPax} Adult Pax):
-                        </span>
-                        <span className="font-bold text-[#2C1E15]">₱{roomCost.toLocaleString()}</span>
-                      </div>
+                      <React.Fragment key={`ind-room-cost-${room.id}-${idx}`}>
+                        <div className="flex items-center justify-between text-[11px] text-[#523A2A]">
+                          <span className="font-medium">
+                            {roomUnitName} ({assignedPax} Adult Pax):
+                          </span>
+                          <span className="font-bold text-[#2C1E15]">₱{adultRoomCost.toLocaleString()}</span>
+                        </div>
+                        {childPax > 0 && (
+                          <div className="flex items-center justify-between text-[11px] text-amber-900 pl-2">
+                            <span className="font-medium">
+                              {roomUnitName} ({childPax} Child 6-10 yrs):
+                            </span>
+                            <span className="font-bold text-amber-900">₱{totalChildCostForRoom.toLocaleString()}</span>
+                          </div>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </div>
@@ -2818,12 +2791,10 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                 const qty = addonQuantities[addon.id] || 0;
                 if (qty === 0) return null;
                 const cost = getAddonCost(addon, qty);
-                const isExtraPax = addon.id === 'extra_pax_all_rooms';
                 return (
                   <div key={`summary-addon-${addon.id}`} className="flex items-center justify-between text-[#786150]">
                     <span>
-                      {addon.name} (x{qty}
-                      {isExtraPax ? ` • ${extraPaxCalendarRateInfo.unitLabel}` : ''})
+                      {addon.name} (x{qty})
                     </span>
                     <span className="font-medium text-[#2C1E15]">₱{cost.toLocaleString()}</span>
                   </div>

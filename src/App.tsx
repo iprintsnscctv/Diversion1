@@ -60,7 +60,7 @@ export default function App() {
   const [rooms, setRooms] = useState<RoomUnit[]>(() => {
     try {
       const version = localStorage.getItem('diversion_room_capacity_version');
-      if (version === 'v24') {
+      if (version === 'v25') {
         const saved = localStorage.getItem('diversion_admin_inventory_rooms');
         if (saved) {
           const parsed = JSON.parse(saved);
@@ -70,7 +70,7 @@ export default function App() {
         }
       } else {
         localStorage.removeItem('diversion_admin_inventory_rooms');
-        localStorage.setItem('diversion_room_capacity_version', 'v24');
+        localStorage.setItem('diversion_room_capacity_version', 'v25');
       }
     } catch {}
     return ROOMS_DATA;
@@ -580,6 +580,7 @@ export default function App() {
             onInventoryRoomsUpdate={handleInventoryRoomsUpdate}
             availableAddons={availableAddons}
             onCustomAddonsUpdate={(updated) => setAvailableAddons(updated)}
+            onNavigate={(tab) => handleNavigateSection(tab)}
           />
         )}
       </main>

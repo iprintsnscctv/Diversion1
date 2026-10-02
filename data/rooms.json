@@ -9,8 +9,8 @@
       "Room 0"
     ],
     "capacity": {
-      "minGuests": 0,
-      "maxGuests": 0,
+      "minGuests": 1,
+      "maxGuests": 8,
       "recommended": "8 Pax"
     },
     "pricing": {
@@ -69,9 +69,8 @@
     ],
     "hasPool": false,
     "images": [
-      "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1000&q=80",
-      "https://images.unsplash.com/photo-1618773928121-c32242e63f39?auto=format&fit=crop&w=1000&q=80",
-      "https://images.unsplash.com/photo-1584132967334-10e028bd69f7?auto=format&fit=crop&w=1000&q=80"
+      "/uploads/room_cover_1790917625749_1_2030.jpg",
+      "/uploads/room_1790916505748_1_7629.jpg"
     ],
     "featured": true,
     "extraPaxFee": 0,
@@ -153,9 +152,9 @@
     ],
     "hasPool": false,
     "images": [
-      "https://images.unsplash.com/photo-1618773928121-c32242e63f39?auto=format&fit=crop&w=1000&q=80",
-      "https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1000&q=80",
-      "https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=1000&q=80"
+      "/uploads/room_1790918065103_2_4390.jpg",
+      "/uploads/room_1790918065102_1_6731.jpg",
+      "/uploads/room_1790918065104_3_3591.jpg"
     ],
     "featured": false
   },
@@ -795,38 +794,62 @@
     "featured": false
   },
   {
-    "id": "room-12",
-    "roomNumber": "Room 12",
-    "title": "Room 12 – Standard Room",
-    "subtitle": "Room 12 • 2 Pax • 4 Double Beds",
-    "category": "Standard Rooms",
+    "id": "room-18",
+    "roomNumber": "Room 18",
+    "title": "Room 18 – Big Family Room",
+    "subtitle": "Room 18 • 8 Pax • 4 Double Beds",
+    "category": "Big Family Rooms",
     "roomNumbers": [
-      "Room 12"
+      "Room 18"
     ],
     "capacity": {
       "minGuests": 1,
-      "maxGuests": 2,
-      "recommended": "2 Pax"
+      "maxGuests": 8,
+      "recommended": "8 Pax"
     },
     "pricing": {
-      "nightly": 900,
-      "hourly3hr": 400,
-      "hourly6hr": 650,
-      "hourly12hr": 850
+      "nightly": 2000,
+      "hourly3hr": 800,
+      "hourly6hr": 1300,
+      "hourly12hr": 1800
     },
     "paxRates": [
       {
-        "paxLabel": "1-2 pax",
-        "pax": 2,
-        "weekdayRate": 900,
-        "weekendRate": 1000
+        "paxLabel": "1-5 pax",
+        "pax": 5,
+        "weekdayRate": 2000,
+        "weekendRate": 2200
+      },
+      {
+        "paxLabel": "6 pax",
+        "pax": 6,
+        "weekdayRate": 2400,
+        "weekendRate": 2550
+      },
+      {
+        "paxLabel": "7 pax",
+        "pax": 7,
+        "weekdayRate": 2550,
+        "weekendRate": 2750
+      },
+      {
+        "paxLabel": "8 pax",
+        "pax": 8,
+        "weekdayRate": 2700,
+        "weekendRate": 3000
+      },
+      {
+        "paxLabel": "9",
+        "pax": 9,
+        "weekdayRate": 2850,
+        "weekendRate": 3100
       }
     ],
-    "weekdayRateDisplay": "₱900",
-    "weekendRateDisplay": "₱1,000",
+    "weekdayRateDisplay": "₱2,000 – ₱2,700",
+    "weekendRateDisplay": "₱2,200 – ₱3,000",
     "beds": "4 Double Beds",
-    "sizeSqM": 22,
-    "description": "Comfortable and private Standard Room 12 designed for couples or individual guests (capacity 2 Pax). Comes with air conditioning, private CR with hot/cold shower, Wi-Fi, double lock doors, 24HR CCTV security, and shared kitchen access.",
+    "sizeSqM": 45,
+    "description": "Spacious Big Family Room 18 located on the main floor. Equipped with powerful aircon, private CR with hot/cold shower, Wi-Fi, double lock doors, 24HR CCTV, pet-friendly accommodation, wide parking, and common kitchen access.",
     "amenities": [
       "Aircon",
       "Private CR",

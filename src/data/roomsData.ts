@@ -522,14 +522,14 @@ export const ROOMS_DATA: RoomUnit[] = [
     featured: false,
   },
 
-  // --- Room 12 ---
+  // --- Room 18 ---
   {
-    id: 'room-12',
-    roomNumber: 'Room 12',
-    title: 'Room 12 – Big Family Room',
-    subtitle: 'Room 12 • 8 Pax • 4 Double Beds',
+    id: 'room-18',
+    roomNumber: 'Room 18',
+    title: 'Room 18 – Big Family Room',
+    subtitle: 'Room 18 • 8 Pax • 4 Double Beds',
     category: 'Big Family Rooms',
-    roomNumbers: ['Room 12'],
+    roomNumbers: ['Room 18'],
     capacity: {
       minGuests: 1,
       maxGuests: 8,
@@ -547,7 +547,7 @@ export const ROOMS_DATA: RoomUnit[] = [
     beds: '4 Double Beds',
     sizeSqM: 45,
     description:
-      'Spacious Big Family Room 12 located on the main floor. Equipped with powerful aircon, private CR with hot/cold shower, Wi-Fi, double lock doors, 24HR CCTV, pet-friendly accommodation, wide parking, and common kitchen access.',
+      'Spacious Big Family Room 18 located on the main floor. Equipped with powerful aircon, private CR with hot/cold shower, Wi-Fi, double lock doors, 24HR CCTV, pet-friendly accommodation, wide parking, and common kitchen access.',
     amenities: STANDARD_AMENITIES,
     hasPool: false,
     images: [
@@ -708,15 +708,6 @@ export const ROOMS_DATA: RoomUnit[] = [
 ];
 
 export const AVAILABLE_ADDONS: BookingAddonItem[] = [
-  {
-    id: 'extra_pax_all_rooms',
-    name: 'Extra Pax (All Rooms)',
-    price: 300,
-    unitLabel: 'Sun–Mon ₱300 • Fri–Sat ₱350',
-    isPerNight: true,
-    quantity: 0,
-    description: 'Extra pax rate for standard rooms by days rate: Sunday to Monday ₱300, Friday to Saturday ₱350',
-  },
   {
     id: 'extra_pax_adult_villa',
     name: 'Extra Pax Adult (Private Villa)',

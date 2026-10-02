@@ -12,7 +12,8 @@ import {
   ChatMessage,
   PaxRateTier,
   PresetQA,
-  DEFAULT_PRESET_QAS
+  DEFAULT_PRESET_QAS,
+  NavigationTab
 } from '../types';
 import { VillaLogo } from './VillaLogo';
 import { 
@@ -53,6 +54,7 @@ import {
   Sparkles,
   Star,
   ArrowRight,
+  ArrowLeft,
   RefreshCw,
   Sliders,
   CheckSquare,
@@ -72,8 +74,13 @@ import {
   MapPin,
   Bookmark,
   ChevronRight,
-  Copy
+  Copy,
+  Upload,
+  ExternalLink,
+  Image as LucideImage
 } from 'lucide-react';
+
+const FALLBACK_ROOM_IMAGE = 'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1000&q=80';
 
 interface AdminDeskTabProps {
   bookings: BookingRecord[];
@@ -93,6 +100,7 @@ interface AdminDeskTabProps {
   onInventoryRoomsUpdate?: (rooms: RoomUnit[]) => void;
   availableAddons?: BookingAddonItem[];
   onCustomAddonsUpdate?: (addons: BookingAddonItem[]) => void;
+  onNavigate?: (tab: NavigationTab) => void;
 }
 
 const DEFAULT_SUPER_ADMIN_PERMISSIONS: StaffPermissions = {
@@ -149,6 +157,7 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
   onInventoryRoomsUpdate,
   availableAddons,
   onCustomAddonsUpdate,
+  onNavigate,
 }) => {
   // Login credentials state
   const [username, setUsername] = useState('');
@@ -218,7 +227,7 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
   // Admin filter states
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | BookingStatus>('All');
-  const [activeSubTab, setActiveSubTab] = useState<'bookings' | 'screening' | 'rebook' | 'inquiries' | 'chat' | 'walkin' | 'staff' | 'inventory' | 'guests'>('bookings');
+  const [activeSubTab, setActiveSubTab] = useState<'bookings' | 'screening' | 'rebook' | 'inquiries' | 'chat' | 'walkin' | 'staff' | 'inventory' | 'guests' | 'gallery'>('bookings');
 
   // Room Inventory State for Admin Desk Customization
   const [inventoryRooms, setInventoryRooms] = useState<RoomUnit[]>(() => {
@@ -260,8 +269,10 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
     }
   }, [inventoryRooms]);
 
-  // Specific Date Rates: { [roomId: string]: { [dateStr: string]: number } }
-  const [dateRates, setDateRates] = useState<{ [roomId: string]: { [dateStr: string]: number } }>(() => {
+  // Specific Date Rates: { [roomId: string]: { [dateStr: string]: number | { rate: number; childRate?: number; label?: string } } }
+  const [dateRates, setDateRates] = useState<{
+    [roomId: string]: { [dateStr: string]: number | { rate: number; childRate?: number; label?: string } };
+  }>(() => {
     try {
       const saved = localStorage.getItem('diversion_admin_date_rates');
       if (saved) return JSON.parse(saved);
@@ -323,6 +334,7 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
 
   const [newRateDate, setNewRateDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [newRateAmount, setNewRateAmount] = useState<string>('1500');
+  const [newRateChildAmount, setNewRateChildAmount] = useState<string>('250');
   const [newRateLabel, setNewRateLabel] = useState<string>('Special Holiday Rate');
   const [newPaxLabel, setNewPaxLabel] = useState<string>('');
   const [newPaxCount, setNewPaxCount] = useState<string>('2');
@@ -330,6 +342,223 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
   const [newPaxWeekendRate, setNewPaxWeekendRate] = useState<string>('1200');
 
   const [coverUrlInput, setCoverUrlInput] = useState<string>('');
+
+  // Room Pictures & Gallery States for Explore Room Cards
+  const [galleryNotification, setGalleryNotification] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+  const [isUploadingCover, setIsUploadingCover] = useState<boolean>(false);
+  const [isUploadingGallery, setIsUploadingGallery] = useState<boolean>(false);
+  const [previewActiveImgIdx, setPreviewActiveImgIdx] = useState<number>(0);
+  const [galleryCategoryFilter, setGalleryCategoryFilter] = useState<string>('All');
+
+  const handleUpdateRoomImages = async (roomId: string, newImages: string[], message?: string) => {
+    if (!newImages || newImages.length === 0) return;
+
+    const updated = inventoryRooms.map((r) =>
+      r.id === roomId ? { ...r, images: newImages } : r
+    );
+    setInventoryRooms(updated);
+    localStorage.setItem('diversion_admin_inventory_rooms', JSON.stringify(updated));
+
+    if (onInventoryRoomsUpdateRef.current) {
+      onInventoryRoomsUpdateRef.current(updated);
+    }
+
+    try {
+      await fetch('/api/rooms', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rooms: updated }),
+      });
+    } catch (err) {
+      console.error('Failed to save updated room images to server:', err);
+    }
+
+    if (message) {
+      setGalleryNotification({ message, type: 'success' });
+      setTimeout(() => {
+        setGalleryNotification((prev) => (prev?.message === message ? null : prev));
+      }, 4000);
+    }
+  };
+
+  const handleUploadCoverPhoto = async (file: File) => {
+    if (!selectedInventoryRoom) return;
+    setIsUploadingCover(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target?.result as string;
+        if (!base64) {
+          setIsUploadingCover(false);
+          return;
+        }
+
+        let finalUrl = base64;
+        try {
+          const res = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image: base64,
+              folder: 'room_cover',
+              name: file.name
+            })
+          });
+          const data = await res.json();
+          if (data.success && data.url) {
+            finalUrl = data.url;
+          }
+        } catch (err) {
+          console.warn('Backend cover photo upload fallback to base64:', err);
+        }
+
+        const updatedImages = [finalUrl, ...selectedInventoryRoom.images.filter((img) => img !== finalUrl)];
+        await handleUpdateRoomImages(
+          selectedInventoryRoom.id,
+          updatedImages,
+          `New cover photo uploaded and active on Explore Room Card for ${selectedInventoryRoom.roomNumber || selectedInventoryRoom.title}!`
+        );
+        setPreviewActiveImgIdx(0);
+        setIsUploadingCover(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setIsUploadingCover(false);
+      setGalleryNotification({ message: 'Failed to read image file. Please try again.', type: 'error' });
+    }
+  };
+
+  const handleUploadGalleryPhotos = async (files: FileList | File[]) => {
+    if (!selectedInventoryRoom || !files || files.length === 0) return;
+    setIsUploadingGallery(true);
+
+    try {
+      const fileArray = Array.from(files);
+      const readPromises = fileArray.map((file) => {
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      });
+
+      const base64List = await Promise.all(readPromises);
+      let permanentUrls = base64List;
+
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            images: base64List,
+            folder: 'room'
+          })
+        });
+        const data = await res.json();
+        if (data.success && Array.isArray(data.urls) && data.urls.length > 0) {
+          permanentUrls = data.urls;
+        }
+      } catch (err) {
+        console.warn('Backend gallery upload fallback to base64:', err);
+      }
+
+      const updatedImages = [...selectedInventoryRoom.images, ...permanentUrls];
+      await handleUpdateRoomImages(
+        selectedInventoryRoom.id,
+        updatedImages,
+        `${permanentUrls.length} picture(s) uploaded to gallery and active on Explore Room Card for ${selectedInventoryRoom.roomNumber || selectedInventoryRoom.title}!`
+      );
+    } catch (err) {
+      setGalleryNotification({ message: 'Error uploading gallery photos.', type: 'error' });
+    } finally {
+      setIsUploadingGallery(false);
+    }
+  };
+
+  const handleSetCoverPhoto = async (index: number) => {
+    if (!selectedInventoryRoom || index === 0 || index >= selectedInventoryRoom.images.length) return;
+    const targetImage = selectedInventoryRoom.images[index];
+    const otherImages = selectedInventoryRoom.images.filter((_, i) => i !== index);
+    const updatedImages = [targetImage, ...otherImages];
+    await handleUpdateRoomImages(
+      selectedInventoryRoom.id,
+      updatedImages,
+      `Photo #${index + 1} is now set as the active cover on the Explore Room Card!`
+    );
+    setPreviewActiveImgIdx(0);
+  };
+
+  const handleDeletePhoto = async (index: number) => {
+    if (!selectedInventoryRoom) return;
+    if (selectedInventoryRoom.images.length <= 1) {
+      setGalleryNotification({
+        message: 'A room unit must have at least one photo.',
+        type: 'error'
+      });
+      return;
+    }
+    const updatedImages = selectedInventoryRoom.images.filter((_, i) => i !== index);
+    await handleUpdateRoomImages(
+      selectedInventoryRoom.id,
+      updatedImages,
+      'Photo deleted from room gallery.'
+    );
+    setPreviewActiveImgIdx(0);
+  };
+
+  const handleMovePhoto = async (index: number, direction: 'left' | 'right') => {
+    if (!selectedInventoryRoom) return;
+    const targetIdx = direction === 'left' ? index - 1 : index + 1;
+    if (targetIdx < 0 || targetIdx >= selectedInventoryRoom.images.length) return;
+
+    const list = [...selectedInventoryRoom.images];
+    const temp = list[index];
+    list[index] = list[targetIdx];
+    list[targetIdx] = temp;
+
+    await handleUpdateRoomImages(
+      selectedInventoryRoom.id,
+      list,
+      targetIdx === 0
+        ? `Photo moved to position #1 — now active as Explore Room Card cover!`
+        : `Photo order updated in gallery.`
+    );
+    setPreviewActiveImgIdx(targetIdx);
+  };
+
+  const handleAddPhotoByUrl = async (asCover: boolean) => {
+    if (!selectedInventoryRoom || !coverUrlInput.trim()) return;
+    let url = coverUrlInput.trim();
+
+    if (url.startsWith('data:image/')) {
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: url, folder: 'room' })
+        });
+        const data = await res.json();
+        if (data.success && data.url) {
+          url = data.url;
+        }
+      } catch {}
+    }
+
+    const updatedImages = asCover
+      ? [url, ...selectedInventoryRoom.images.filter((img) => img !== url)]
+      : [...selectedInventoryRoom.images, url];
+
+    await handleUpdateRoomImages(
+      selectedInventoryRoom.id,
+      updatedImages,
+      asCover
+        ? `Photo URL set as Explore Room Card cover for ${selectedInventoryRoom.roomNumber || selectedInventoryRoom.title}!`
+        : `Photo URL added to room gallery!`
+    );
+    setCoverUrlInput('');
+    setPreviewActiveImgIdx(0);
+  };
 
   // Copy Rate Settings State
   const [showCopyRatesModal, setShowCopyRatesModal] = useState(false);
@@ -1695,6 +1924,20 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
               + Walk-In
             </button>
 
+            {/* Room Pictures & Gallery Tab (Explore Room Cards) */}
+            <button
+              onClick={() => setActiveSubTab('gallery')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeSubTab === 'gallery'
+                  ? 'bg-gradient-to-r from-[#B8860B] to-[#997A15] text-white shadow-sm ring-2 ring-amber-400/40'
+                  : 'text-[#523A2A] hover:bg-white/60'
+              }`}
+              title="Manage room pictures & gallery for Explore Room cards"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Room Pictures &amp; Gallery</span>
+            </button>
+
             {/* Room Inventory & Customization */}
             <button
               onClick={() => setActiveSubTab('inventory')}
@@ -1800,6 +2043,442 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
 
       </div>
 
+      {/* SUB-TAB: ROOM PICTURES & GALLERY (EXPLORE ROOM CARDS) */}
+      {activeSubTab === 'gallery' && (
+        <div className="space-y-6">
+          {/* Notification Toast Banner */}
+          {galleryNotification && (
+            <div className={`p-4 rounded-2xl border flex items-center justify-between shadow-md transition-all animate-in fade-in duration-300 ${
+              galleryNotification.type === 'error'
+                ? 'bg-rose-50 text-rose-800 border-rose-300'
+                : 'bg-gradient-to-r from-amber-50 via-amber-100 to-amber-50 text-[#2C1E15] border-amber-300'
+            }`}>
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className={`w-5 h-5 shrink-0 ${galleryNotification.type === 'error' ? 'text-rose-600' : 'text-[#8B6B10]'}`} />
+                <span className="text-xs sm:text-sm font-bold">{galleryNotification.message}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGalleryNotification(null)}
+                className="p-1 hover:bg-black/5 rounded-lg text-xs font-bold cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          <div className="bg-white rounded-3xl border border-[#E6D7C3]/70 shadow-xl p-6 sm:p-8 space-y-6">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#E6D7C3]/60 pb-6">
+              <div>
+                <div className="inline-flex items-center gap-2 bg-[#F5EBE6] text-[#8B6B10] px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider mb-2 border border-[#E6D7C3]">
+                  <Sparkles className="w-3.5 h-3.5 text-[#B8860B]" />
+                  <span>Explore Room Cards Studio</span>
+                </div>
+                <h3 className="text-2xl sm:text-3xl font-serif font-bold text-[#2C1E15]">
+                  Room Pictures &amp; Gallery Management
+                </h3>
+                <p className="text-xs sm:text-sm text-[#786150] mt-1 max-w-2xl">
+                  Upload high-resolution photos and organize galleries for each room. Image #1 (★ Cover) automatically displays as the active cover photo on the public <strong>Explore Room Card</strong>.
+                </p>
+              </div>
+
+              {onNavigate && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('explore')}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-[#2C1E15] to-[#4A3222] hover:brightness-110 text-[#FFF2CC] text-xs font-bold rounded-2xl shadow-sm transition-all cursor-pointer shrink-0 border border-[#D4AF37]/30"
+                >
+                  <ExternalLink className="w-4 h-4 text-[#D4AF37]" />
+                  <span>View Live on Explore Rooms Page</span>
+                </button>
+              )}
+            </div>
+
+            {/* Room Selector Strip */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-xs font-extrabold text-[#2C1E15] uppercase tracking-wider flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-[#B8860B]" />
+                  <span>Select Accommodation Unit ({inventoryRooms.length} Units)</span>
+                </label>
+                <div className="flex items-center gap-1.5 text-xs text-[#786150]">
+                  <span>Filter Category:</span>
+                  <select
+                    value={galleryCategoryFilter}
+                    onChange={(e) => setGalleryCategoryFilter(e.target.value)}
+                    className="px-2.5 py-1 rounded-lg border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-bold text-[#2C1E15]"
+                  >
+                    {['All', ...Array.from(new Set(inventoryRooms.map((r) => r.category)))].map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Horizontal Room Cards Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+                {inventoryRooms
+                  .filter((r) => galleryCategoryFilter === 'All' || r.category === galleryCategoryFilter)
+                  .map((r) => {
+                    const isSelected = r.id === selectedInventoryRoom?.id;
+                    const coverImg = r.images[0] || FALLBACK_ROOM_IMAGE;
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => {
+                          setEditingRoomId(r.id);
+                          setPreviewActiveImgIdx(0);
+                        }}
+                        className={`p-2 rounded-2xl border text-left transition-all cursor-pointer relative overflow-hidden group flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-amber-50/80 border-[#B8860B] ring-2 ring-[#D4AF37]/50 shadow-md'
+                            : 'bg-[#FAF7F2] border-[#E6D7C3] hover:border-[#B8860B]/60 hover:bg-white'
+                        }`}
+                      >
+                        <div className="aspect-[4/3] rounded-xl overflow-hidden bg-stone-200 mb-2 relative border border-[#E6D7C3]/60">
+                          <img src={coverImg} alt={r.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                          <span className="absolute bottom-0 inset-x-0 bg-black/70 text-white text-[8px] font-bold text-center py-0.5">
+                            {r.images.length} photo{r.images.length !== 1 ? 's' : ''}
+                          </span>
+                          {isSelected && (
+                            <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-white"></span>
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <span className="block text-xs font-black text-[#2C1E15] truncate">
+                            {r.roomNumber || r.title}
+                          </span>
+                          <span className="block text-[10px] text-[#786150] truncate">
+                            {r.category}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {selectedInventoryRoom && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 pt-4 border-t border-[#E6D7C3]/60 items-start">
+                {/* Left 7 cols: Uploader & Current Gallery Controls */}
+                <div className="lg:col-span-7 space-y-6">
+                  
+                  {/* Unit Info banner */}
+                  <div className="bg-[#FAF7F2] p-4 rounded-2xl border border-[#E6D7C3] flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <h4 className="text-lg font-serif font-bold text-[#2C1E15] flex items-center gap-2">
+                        <span>{selectedInventoryRoom.title}</span>
+                        <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-full">
+                          {selectedInventoryRoom.images.length} Photos
+                        </span>
+                      </h4>
+                      <p className="text-xs text-[#786150] mt-0.5">
+                        Category: <strong>{selectedInventoryRoom.category}</strong> • Recommended: <strong>{selectedInventoryRoom.capacity.recommended}</strong>
+                      </p>
+                    </div>
+                    <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full">
+                      ● Real-Time Sync Active
+                    </span>
+                  </div>
+
+                  {/* PRIMARY ACTION: Upload & Set as Explore Room Card Cover */}
+                  <div className="bg-gradient-to-br from-amber-50/90 via-amber-100/40 to-amber-50/60 p-5 rounded-3xl border-2 border-amber-300/80 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="p-1.5 bg-[#B8860B] text-white rounded-lg shadow-2xs">
+                          <Sparkles className="w-4 h-4" />
+                        </span>
+                        <div>
+                          <h5 className="text-sm font-bold text-[#2C1E15]">
+                            Upload &amp; Set as Explore Room Card Cover
+                          </h5>
+                          <p className="text-[11px] text-[#786150]">
+                            Immediately uploaded, saved permanently, placed at #1 (★ Cover) and active on the Explore Room Card.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-md border border-amber-300">
+                        ★ Cover Photo
+                      </span>
+                    </div>
+
+                    <div className="pt-1">
+                      <label className={`w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl border-2 border-dashed border-[#B8860B]/70 bg-white hover:bg-amber-50/60 cursor-pointer transition-all ${
+                        isUploadingCover ? 'opacity-60 pointer-events-none' : ''
+                      }`}>
+                        <Upload className="w-4 h-4 text-[#B8860B]" />
+                        <span className="text-xs font-bold text-[#2C1E15]">
+                          {isUploadingCover ? 'Uploading Cover Photo...' : 'Choose File to Set as Explore Room Card Cover'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={isUploadingCover}
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (files && files.length > 0) {
+                              handleUploadCoverPhoto(files[0]);
+                            }
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* SECONDARY ACTION: Upload Additional Gallery Photos */}
+                  <div className="bg-white p-5 rounded-3xl border border-[#E6D7C3] shadow-xs space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="p-1.5 bg-[#2C1E15] text-white rounded-lg shadow-2xs">
+                        <Upload className="w-4 h-4" />
+                      </span>
+                      <div>
+                        <h5 className="text-sm font-bold text-[#2C1E15]">
+                          Upload Additional Gallery Photos (Multiple)
+                        </h5>
+                        <p className="text-[11px] text-[#786150]">
+                          Photos appear in the Explore Room Card photo cycle stepper ('Photo 1/X ↻') and in the 'View Details' modal.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-1">
+                      <label className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-[#E6D7C3] bg-[#FAF7F2] hover:bg-[#F5EBE6] cursor-pointer transition-all ${
+                        isUploadingGallery ? 'opacity-60 pointer-events-none' : ''
+                      }`}>
+                        <Upload className="w-4 h-4 text-[#786150]" />
+                        <span className="text-xs font-bold text-[#2C1E15]">
+                          {isUploadingGallery ? 'Uploading Gallery Photos...' : 'Select Multiple Photos for Gallery'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          disabled={isUploadingGallery}
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (files && files.length > 0) {
+                              handleUploadGalleryPhotos(files);
+                            }
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* TERTIARY ACTION: Add by Image URL */}
+                  <div className="bg-white p-4 rounded-2xl border border-[#E6D7C3] space-y-2">
+                    <label className="text-xs font-bold text-[#2C1E15] block">
+                      Or Add Photo by Web URL
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="url"
+                        placeholder="https://example.com/room-photo.jpg"
+                        value={coverUrlInput}
+                        onChange={(e) => setCoverUrlInput(e.target.value)}
+                        className="flex-1 px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs outline-none focus:ring-2 focus:ring-[#B8860B]"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleAddPhotoByUrl(true)}
+                          className="px-3 py-2 bg-gradient-to-r from-[#B8860B] to-[#997A15] hover:brightness-110 text-white text-xs font-bold rounded-xl cursor-pointer shadow-xs whitespace-nowrap"
+                        >
+                          Set as Card Cover
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddPhotoByUrl(false)}
+                          className="px-3 py-2 bg-[#2C1E15] hover:bg-[#3D2616] text-white text-xs font-bold rounded-xl cursor-pointer shadow-xs whitespace-nowrap"
+                        >
+                          Add to Gallery
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CURRENT PHOTOS IN GALLERY */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h5 className="text-xs font-extrabold uppercase tracking-wider text-[#2C1E15] flex items-center gap-1.5">
+                        <span>Current Room Photos ({selectedInventoryRoom.images.length})</span>
+                      </h5>
+                      <span className="text-[10px] text-[#786150]">
+                        Click ★ on any photo to set it as the Explore Room Card cover
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {selectedInventoryRoom.images.map((imgUrl, imgIdx) => {
+                        const isCover = imgIdx === 0;
+                        return (
+                          <div
+                            key={imgIdx}
+                            className={`rounded-2xl border-2 overflow-hidden bg-stone-100 flex flex-col justify-between shadow-xs transition-all ${
+                              isCover
+                                ? 'border-[#B8860B] ring-2 ring-[#D4AF37]/50 shadow-md bg-amber-50/30'
+                                : 'border-[#E6D7C3] hover:border-stone-400'
+                            }`}
+                          >
+                            <div className="relative aspect-[4/3] bg-stone-200 overflow-hidden">
+                              <img src={imgUrl} alt={`Photo ${imgIdx + 1}`} className="w-full h-full object-cover" />
+                              
+                              {/* Top Badges & Actions */}
+                              <div className="absolute top-2 inset-x-2 flex items-center justify-between z-10">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-black shadow-sm ${
+                                  isCover
+                                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white border border-amber-300'
+                                    : 'bg-black/70 text-white'
+                                }`}>
+                                  {isCover ? '★ CARD COVER' : `#${imgIdx + 1}`}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeletePhoto(imgIdx)}
+                                  className="p-1 rounded-full bg-rose-600/90 hover:bg-rose-700 text-white shadow-md cursor-pointer transition-all active:scale-95"
+                                  title="Delete photo from gallery"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Bottom Set Cover Button */}
+                            <div className="p-2 bg-white border-t border-[#E6D7C3]/60">
+                              {!isCover ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetCoverPhoto(imgIdx)}
+                                  className="w-full text-[10px] font-extrabold text-[#2C1E15] bg-amber-50 hover:bg-amber-400 hover:text-white px-2 py-1.5 rounded-xl border border-amber-300 flex items-center justify-center gap-1 cursor-pointer transition-all shadow-2xs"
+                                >
+                                  <Star className="w-3 h-3 text-amber-500 fill-amber-500" />
+                                  <span>Set as Card Cover</span>
+                                </button>
+                              ) : (
+                                <div className="w-full text-[10px] font-black text-amber-900 bg-amber-100/80 border border-amber-300 px-2 py-1 rounded-xl text-center flex items-center justify-center gap-1">
+                                  <Sparkles className="w-3 h-3 text-amber-600" />
+                                  <span>Active on Explore Card</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Right 5 cols: Live Explore Room Card Replica */}
+                <div className="lg:col-span-5 space-y-4">
+                  <div className="bg-[#FAF7F2] p-4 rounded-3xl border border-[#E6D7C3] space-y-3 sticky top-6">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-serif font-bold text-base text-[#2C1E15] flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-[#8B6B10]" />
+                        <span>Live Explore Room Card</span>
+                      </h4>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-800 font-extrabold px-2 py-0.5 rounded-full border border-emerald-300">
+                        ● Live Card Preview
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#786150]">
+                      This is the live accommodation card guests see on the Explore Rooms page. Test the photo cycle stepper or click below to view on the live site.
+                    </p>
+
+                    {/* Exact Replica of Explore Room Card */}
+                    <div className="bg-white rounded-3xl border-2 border-[#D4AF37] overflow-hidden shadow-xl flex flex-col justify-between">
+                      {/* Image Section */}
+                      <div className="relative aspect-[4/3] overflow-hidden bg-stone-200">
+                        <img
+                          src={selectedInventoryRoom.images[previewActiveImgIdx % selectedInventoryRoom.images.length] || selectedInventoryRoom.images[0] || FALLBACK_ROOM_IMAGE}
+                          alt={selectedInventoryRoom.title}
+                          className="w-full h-full object-cover transition-all duration-300"
+                        />
+
+                        {/* Room Number Badge (Top-Left) with Gold Frame */}
+                        <div className="absolute top-3.5 left-3.5 bg-[#1F140C]/90 backdrop-blur-md text-[#FFF2CC] border border-[#D4AF37]/50 px-3.5 py-1 rounded-full text-xs font-bold tracking-wider shadow-md flex items-center gap-1.5 font-monogram">
+                          <span className="w-2 h-2 rounded-full bg-[#E5C158] animate-pulse"></span>
+                          <span>{selectedInventoryRoom.roomNumber || selectedInventoryRoom.title}</span>
+                        </div>
+
+                        {/* Capacity Pill (Top-Right) */}
+                        <div className="absolute top-3.5 right-3.5 bg-black/65 backdrop-blur-md text-[#FFFDF7] border border-white/20 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5">
+                          <Users className="w-3.5 h-3.5 text-[#E5C158]" />
+                          <span>{selectedInventoryRoom.capacity.recommended}</span>
+                        </div>
+
+                        {/* Multi-image thumbnail stepper */}
+                        {selectedInventoryRoom.images.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setPreviewActiveImgIdx((prev) => (prev + 1) % selectedInventoryRoom.images.length)}
+                            className="absolute bottom-3 right-3 bg-white/95 hover:bg-white text-[#2C1E15] px-2.5 py-1 rounded-xl text-[11px] font-bold backdrop-blur-sm shadow-md transition-colors cursor-pointer border border-[#E6D7C3]"
+                            title="Cycle to next photo"
+                          >
+                            Photo {(previewActiveImgIdx % selectedInventoryRoom.images.length) + 1}/{selectedInventoryRoom.images.length} ↻
+                          </button>
+                        )}
+
+                        {/* Category Pill (Bottom-Left) */}
+                        <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur-sm text-[#2C1E15] px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm border border-[#E6D7C3]">
+                          <span>{selectedInventoryRoom.category}</span>
+                        </div>
+                      </div>
+
+                      {/* Card Body */}
+                      <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                        <div>
+                          <h3 className="font-serif font-bold text-lg text-[#2C1E15]">
+                            {selectedInventoryRoom.title}
+                          </h3>
+                          <p className="text-xs font-semibold text-[#8B6B10] mt-0.5">
+                            {selectedInventoryRoom.subtitle}
+                          </p>
+                          <div className="flex items-center gap-1.5 text-xs text-[#523A2A] font-medium mt-2 bg-[#FAF7F2] border border-[#E6D7C3]/80 px-2.5 py-1.5 rounded-xl">
+                            <Sparkles className="w-3.5 h-3.5 text-[#B8860B] shrink-0" />
+                            <span>{selectedInventoryRoom.beds || `${selectedInventoryRoom.sizeSqM} sq.m unit`}</span>
+                          </div>
+                        </div>
+
+                        <div className="pt-3 border-t border-[#E6D7C3]/60 flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] text-[#786150] block">Nightly Rate</span>
+                            <span className="text-base font-bold text-[#2C1E15]">
+                              ₱{selectedInventoryRoom.pricing.nightly.toLocaleString()}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
+                            ★ Explore Card Sync Ready
+                          </span>
+                        </div>
+
+                        {onNavigate && (
+                          <button
+                            type="button"
+                            onClick={() => onNavigate('explore')}
+                            className="w-full py-2.5 bg-gradient-to-r from-[#B8860B] via-[#D4AF37] to-[#997A15] hover:brightness-110 text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>Open &amp; Check on Public Explore Rooms Page</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* SUB-TAB: ROOM INVENTORY & CUSTOMIZATION */}
       {activeSubTab === 'inventory' && (
         <div className="bg-white rounded-3xl border border-[#E6D7C3]/70 shadow-xl p-6 sm:p-8 space-y-8">
@@ -1855,168 +2534,159 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                 
                 {/* Room Pictures & Gallery Section */}
                 <div className="bg-[#FAF7F2] p-5 rounded-3xl border border-[#E6D7C3] space-y-4">
-                  <h4 className="font-serif font-bold text-base text-[#2C1E15] flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-[#8B6B10]" />
-                    <span>Room Pictures &amp; Gallery ({selectedInventoryRoom.images.length})</span>
-                  </h4>
-
-                  {/* Thumbnail Gallery Grid with Delete & Set Cover */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {selectedInventoryRoom.images.map((imgUrl, imgIdx) => (
-                      <div key={imgIdx} className="relative aspect-square rounded-xl overflow-hidden bg-stone-200 border border-[#E6D7C3] group">
-                        <img src={imgUrl} alt={`Room photo ${imgIdx + 1}`} className="w-full h-full object-cover" />
-                        
-                        {/* Top Badge */}
-                        <div className={`absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold z-10 ${
-                          imgIdx === 0 ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-2xs' : 'bg-black/60 text-white'
-                        }`}>
-                          {imgIdx === 0 ? '★ Cover' : `#${imgIdx + 1}`}
-                        </div>
-
-                        {/* Top Right Actions */}
-                        <div className="absolute top-1 right-1 flex items-center gap-1 z-10">
-                          {imgIdx !== 0 && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const selectedImage = selectedInventoryRoom.images[imgIdx];
-                                const otherImages = selectedInventoryRoom.images.filter((_, idx) => idx !== imgIdx);
-                                const updatedImages = [selectedImage, ...otherImages];
-                                setInventoryRooms((prev) =>
-                                  prev.map((r) =>
-                                    r.id === selectedInventoryRoom.id ? { ...r, images: updatedImages } : r
-                                  )
-                                );
-                              }}
-                              className="bg-amber-500 hover:bg-amber-600 text-white p-1 rounded-full text-xs shadow cursor-pointer transition-all active:scale-95"
-                              title="Set as Cover Photo"
-                            >
-                              <Star className="w-3 h-3 fill-white text-white" />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (selectedInventoryRoom.images.length <= 1) {
-                                alert('Room must have at least one photo.');
-                                return;
-                              }
-                              const updatedImages = selectedInventoryRoom.images.filter((_, idx) => idx !== imgIdx);
-                              setInventoryRooms((prev) =>
-                                prev.map((r) =>
-                                  r.id === selectedInventoryRoom.id ? { ...r, images: updatedImages } : r
-                                )
-                              );
-                            }}
-                            className="bg-rose-600 hover:bg-rose-700 text-white p-1 rounded-full text-xs shadow cursor-pointer transition-all active:scale-95"
-                            title="Delete photo"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-
-                        {/* Bottom Hover Overlay Action */}
-                        {imgIdx !== 0 && (
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex justify-center z-10">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const selectedImage = selectedInventoryRoom.images[imgIdx];
-                                const otherImages = selectedInventoryRoom.images.filter((_, idx) => idx !== imgIdx);
-                                const updatedImages = [selectedImage, ...otherImages];
-                                setInventoryRooms((prev) =>
-                                  prev.map((r) =>
-                                    r.id === selectedInventoryRoom.id ? { ...r, images: updatedImages } : r
-                                  )
-                                );
-                              }}
-                              className="text-[9px] font-bold text-amber-200 bg-black/80 hover:bg-black px-2 py-0.5 rounded-full border border-amber-400/60 flex items-center gap-1 cursor-pointer transition-all shadow-md"
-                            >
-                              <Star className="w-2.5 h-2.5 fill-amber-300 text-amber-300" />
-                              <span>Set as Cover</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#E6D7C3]/60 pb-3 gap-2">
+                    <div>
+                      <h4 className="font-serif font-bold text-base text-[#2C1E15] flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-[#8B6B10]" />
+                        <span>Room Pictures &amp; Gallery</span>
+                      </h4>
+                      <p className="text-[11px] text-[#786150] mt-0.5">
+                        Manage photos for <strong className="text-[#2C1E15]">{selectedInventoryRoom.roomNumber || selectedInventoryRoom.title}</strong>. Image #1 (★ Cover) is the primary image displayed on the <strong>Explore Room Card</strong>.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveSubTab('gallery')}
+                        className="bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 text-[10px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap cursor-pointer transition-colors flex items-center gap-1"
+                      >
+                        <Sparkles className="w-3 h-3 text-[#B8860B]" />
+                        <span>Open Studio View →</span>
+                      </button>
+                      <span className="bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap">
+                        {selectedInventoryRoom.images.length} Photos
+                      </span>
+                    </div>
                   </div>
 
-                  <div className="space-y-3 pt-2 border-t border-[#E6D7C3]/60">
-                    {/* Upload Multiple Pictures */}
+                  {/* Explore Room Card Live Cover Preview */}
+                  <div className="bg-white p-3.5 rounded-2xl border border-[#E6D7C3] flex items-center gap-3.5 shadow-2xs">
+                    <div className="w-24 h-18 rounded-xl overflow-hidden bg-stone-200 border border-[#E6D7C3] shrink-0 relative aspect-[4/3]">
+                      <img 
+                        src={selectedInventoryRoom.images[0] || FALLBACK_ROOM_IMAGE} 
+                        alt="Current Cover" 
+                        className="w-full h-full object-cover" 
+                      />
+                      <span className="absolute bottom-0 inset-x-0 bg-gradient-to-r from-amber-600 to-amber-500 text-white text-[8px] font-extrabold text-center py-0.5 shadow-xs">
+                        ★ Explore Card Cover
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-bold text-[#2C1E15]">
+                          {selectedInventoryRoom.roomNumber || selectedInventoryRoom.title}
+                        </span>
+                        <span className="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded-full border border-emerald-200">
+                          Live On Explore Card
+                        </span>
+                      </div>
+                      <p className="text-[10.5px] text-[#786150] leading-snug mt-1">
+                        This is the active cover photo guests see on the Explore Rooms accommodation card.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Thumbnail Gallery Grid with Delete & Set Cover */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-[#2C1E15] mb-2 uppercase tracking-wider">
+                      Current Room Photos ({selectedInventoryRoom.images.length})
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      {selectedInventoryRoom.images.map((imgUrl, imgIdx) => (
+                        <div key={imgIdx} className="relative aspect-square rounded-xl overflow-hidden bg-stone-200 border-2 border-[#E6D7C3] group flex flex-col justify-between p-1">
+                          <img src={imgUrl} alt={`Room photo ${imgIdx + 1}`} className="absolute inset-0 w-full h-full object-cover" />
+                          
+                          {/* Top Badges */}
+                          <div className="relative z-10 flex items-center justify-between w-full">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold shadow-sm ${
+                              imgIdx === 0 
+                                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white border border-amber-300' 
+                                : 'bg-black/70 text-white'
+                            }`}>
+                              {imgIdx === 0 ? '★ Card Cover' : `#${imgIdx + 1}`}
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePhoto(imgIdx)}
+                              className="bg-rose-600/90 hover:bg-rose-700 text-white p-1 rounded-full text-xs shadow-md cursor-pointer transition-all active:scale-95"
+                              title="Delete photo"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+
+                          {/* Bottom Action: Set as Explore Room Card Cover */}
+                          <div className="relative z-10 mt-auto pt-1">
+                            {imgIdx !== 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => handleSetCoverPhoto(imgIdx)}
+                                className="w-full text-[9px] font-extrabold text-[#2C1E15] bg-white/95 hover:bg-amber-400 hover:text-white px-1.5 py-1 rounded-lg border border-[#E6D7C3] flex items-center justify-center gap-1 cursor-pointer transition-all shadow-md backdrop-blur-xs"
+                                title="Set this photo as the Explore Room Card cover"
+                              >
+                                <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500" />
+                                <span>Set as Card Cover</span>
+                              </button>
+                            ) : (
+                              <span className="w-full text-[8.5px] font-bold text-white bg-black/60 px-1 py-0.5 rounded text-center block backdrop-blur-xs">
+                                Active on Explore Card
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 pt-3 border-t border-[#E6D7C3]/60">
+                    {/* Primary Action: Upload directly to Explore Room Card Cover */}
+                    <div className="bg-amber-50/70 p-3.5 rounded-2xl border border-amber-200/80 space-y-2">
+                      <div className="flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-[#B8860B]" />
+                        <label className="text-xs font-bold text-[#2C1E15]">
+                          Upload &amp; Set as Explore Room Card Cover
+                        </label>
+                      </div>
+                      <p className="text-[10.5px] text-[#786150]">
+                        Uploaded photo will immediately be placed at #1 (★ Cover) and appear as the main image on the Explore Room Card.
+                      </p>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={isUploadingCover}
+                        onChange={(e) => {
+                          const files = e.target.files;
+                          if (files && files.length > 0) {
+                            handleUploadCoverPhoto(files[0]);
+                          }
+                          e.target.value = '';
+                        }}
+                        className="w-full text-xs text-[#786150] file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#B8860B] file:text-white hover:file:bg-[#997A15] cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Secondary Action: Upload Additional Gallery Photos */}
                     <div>
                       <label className="block text-xs font-bold text-[#2C1E15] mb-1">
-                        Upload Multiple Pictures
+                        Upload Additional Gallery Photos (Multiple)
                       </label>
                       <input
                         type="file"
                         accept="image/*"
                         multiple
+                        disabled={isUploadingGallery}
                         onChange={(e) => {
                           const files = e.target.files;
-                          if (!files || files.length === 0) return;
-                          
-                          const newBase64Images: string[] = [];
-                          let loadedCount = 0;
-
-                          Array.from(files).forEach((file) => {
-                            const reader = new FileReader();
-                            reader.onload = (ev) => {
-                              const base64 = ev.target?.result as string;
-                              if (base64) {
-                                newBase64Images.push(base64);
-                              }
-                              loadedCount++;
-                              if (loadedCount === files.length) {
-                                setInventoryRooms((prev) =>
-                                  prev.map((r) =>
-                                    r.id === selectedInventoryRoom.id
-                                      ? { ...r, images: [...r.images, ...newBase64Images] }
-                                      : r
-                                  )
-                                );
-                                alert(`${newBase64Images.length} picture(s) uploaded successfully!`);
-                              }
-                            };
-                            reader.readAsDataURL(file);
-                          });
+                          if (files && files.length > 0) {
+                            handleUploadGalleryPhotos(files);
+                          }
+                          e.target.value = '';
                         }}
-                        className="w-full text-xs text-[#786150] file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#2C1E15] file:text-white hover:file:bg-[#3D2616] cursor-pointer"
+                        className="w-full text-xs text-[#786150] file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#2C1E15] file:text-white hover:file:bg-[#3D2616] cursor-pointer"
                       />
                     </div>
 
-                    {/* Or URL */}
-                    <div>
-                      <label className="block text-xs font-bold text-[#2C1E15] mb-1">
-                        Or Add Picture by Image URL
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="url"
-                          placeholder="https://example.com/photo.jpg"
-                          value={coverUrlInput}
-                          onChange={(e) => setCoverUrlInput(e.target.value)}
-                          className="flex-1 px-3 py-2 rounded-xl border border-[#E6D7C3] bg-white text-xs outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (!coverUrlInput.trim()) return;
-                            setInventoryRooms((prev) =>
-                              prev.map((r) =>
-                                r.id === selectedInventoryRoom.id
-                                  ? { ...r, images: [...r.images, coverUrlInput.trim()] }
-                                  : r
-                              )
-                            );
-                            setCoverUrlInput('');
-                            alert('Picture added via URL successfully!');
-                          }}
-                          className="px-4 py-2 bg-[#2C1E15] hover:bg-[#3D2616] text-white text-xs font-bold rounded-xl cursor-pointer"
-                        >
-                          + Add URL
-                        </button>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
@@ -2042,35 +2712,9 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                     </span>
                   </div>
 
-                  {/* Special Date Presets / Shortcuts */}
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-[#523A2A] uppercase tracking-wider mr-1">
-                      Event Presets:
-                    </span>
-                    {[
-                      { label: 'Holy Week', rate: 3500 },
-                      { label: 'Viva Vigan Festival', rate: 3200 },
-                      { label: 'Christmas / New Year', rate: 4000 },
-                      { label: 'Long Weekend Holiday', rate: 2800 },
-                      { label: 'Town Fiesta', rate: 3000 },
-                    ].map((preset, pIdx) => (
-                      <button
-                        key={pIdx}
-                        type="button"
-                        onClick={() => {
-                          setNewRateLabel(preset.label);
-                          setNewRateAmount(preset.rate.toString());
-                        }}
-                        className="bg-white hover:bg-amber-50 text-[#523A2A] hover:text-[#2C1E15] border border-[#E6D7C3] hover:border-amber-400 px-2.5 py-1 rounded-full text-[10px] font-medium transition-all cursor-pointer shadow-2xs"
-                      >
-                        {preset.label} (₱{preset.rate.toLocaleString()})
-                      </button>
-                    ))}
-                  </div>
-
                   {/* Date Input Form */}
                   <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-white p-4 rounded-2xl border border-[#E6D7C3]">
-                    <div className="sm:col-span-4">
+                    <div className="sm:col-span-3">
                       <label className="block text-[11px] font-bold text-[#2C1E15] mb-1">
                         Target Special Date
                       </label>
@@ -2082,7 +2726,7 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                       />
                     </div>
 
-                    <div className="sm:col-span-4">
+                    <div className="sm:col-span-3">
                       <label className="block text-[11px] font-bold text-[#2C1E15] mb-1">
                         Holiday / Event Name (Tag)
                       </label>
@@ -2107,23 +2751,41 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                       />
                     </div>
 
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] font-bold text-[#2C1E15] mb-1">
+                        Child Rate Pax (₱)
+                      </label>
+                      <input
+                        type="number"
+                        value={newRateChildAmount}
+                        onChange={(e) => setNewRateChildAmount(e.target.value)}
+                        placeholder="e.g. 250"
+                        className="w-full px-3 py-2 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-xs font-bold text-amber-800 outline-none focus:ring-2 focus:ring-amber-500/40"
+                      />
+                    </div>
+
                     <div className="sm:col-span-2 flex items-end">
                       <button
                         type="button"
                         onClick={() => {
                           if (!newRateDate || !newRateAmount) return;
                           const amount = Number(newRateAmount);
+                          const childAmount = newRateChildAmount ? Number(newRateChildAmount) : undefined;
                           setDateRates((prev) => ({
                             ...prev,
                             [selectedInventoryRoom.id]: {
                               ...(prev[selectedInventoryRoom.id] || {}),
-                              [newRateDate]: amount,
+                              [newRateDate]: {
+                                rate: amount,
+                                childRate: childAmount,
+                                label: newRateLabel || 'Special Date',
+                              },
                             },
                           }));
-                          alert(`Special rate override of ₱${amount.toLocaleString()} for ${newRateDate} (${newRateLabel || 'Special Date'}) saved for ${selectedInventoryRoom.roomNumber || selectedInventoryRoom.title}!`);
+                          alert(`Special rate override of ₱${amount.toLocaleString()}${childAmount !== undefined ? ` (Child Pax: ₱${childAmount.toLocaleString()})` : ''} for ${newRateDate} (${newRateLabel || 'Special Date'}) saved for ${selectedInventoryRoom.roomNumber || selectedInventoryRoom.title}!`);
                         }}
                         className="w-full h-[38px] bg-gradient-to-r from-[#B8860B] via-[#D4AF37] to-[#997A15] hover:brightness-110 text-white font-black rounded-xl shadow-sm transition-all cursor-pointer flex items-center justify-center text-base active:scale-95"
-                        title="Add Special Date Rate"
+                        title="Add Special Date Rate & Child Pax Rate"
                       >
                         <Plus className="w-5 h-5 stroke-[2.5]" />
                       </button>
@@ -2138,40 +2800,53 @@ export const AdminDeskTab: React.FC<AdminDeskTabProps> = ({
                         <span className="text-[10px] text-[#786150]">Overrides take priority during booking calculation</span>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                        {Object.entries(dateRates[selectedInventoryRoom.id]).map(([dt, rt]) => (
-                          <div
-                            key={dt}
-                            className="p-3 bg-white rounded-2xl border border-[#E6D7C3] flex items-center justify-between gap-2 shadow-2xs hover:border-amber-400 transition-all"
-                          >
-                            <div className="flex flex-col min-w-0">
-                              <span className="font-mono text-xs font-bold text-[#2C1E15]">{dt}</span>
-                              <span className="text-[10px] text-[#8B6B10] font-semibold truncate">
-                                Special Calendar Override
-                              </span>
+                        {Object.entries(dateRates[selectedInventoryRoom.id]).map(([dt, rawVal]) => {
+                          const rateVal = typeof rawVal === 'number' ? rawVal : (rawVal as any)?.rate ?? 0;
+                          const childRateVal = typeof rawVal === 'object' ? (rawVal as any)?.childRate : undefined;
+                          const labelVal = typeof rawVal === 'object' && (rawVal as any)?.label ? (rawVal as any).label : 'Special Calendar Override';
+
+                          return (
+                            <div
+                              key={dt}
+                              className="p-3 bg-white rounded-2xl border border-[#E6D7C3] flex items-center justify-between gap-2 shadow-2xs hover:border-amber-400 transition-all"
+                            >
+                              <div className="flex flex-col min-w-0">
+                                <span className="font-mono text-xs font-bold text-[#2C1E15]">{dt}</span>
+                                <span className="text-[10px] text-[#8B6B10] font-semibold truncate">
+                                  {labelVal}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <strong className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                                    ₱{Number(rateVal).toLocaleString()}
+                                  </strong>
+                                  {childRateVal !== undefined && (
+                                    <span className="text-[10px] font-bold text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 whitespace-nowrap">
+                                      Child Pax: ₱{Number(childRateVal).toLocaleString()}
+                                    </span>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDateRates((prev) => {
+                                      const copy = { ...prev };
+                                      if (copy[selectedInventoryRoom.id]) {
+                                        delete copy[selectedInventoryRoom.id][dt];
+                                      }
+                                      return copy;
+                                    });
+                                  }}
+                                  className="text-rose-600 hover:text-rose-800 hover:bg-rose-50 p-1 rounded-lg font-bold text-xs cursor-pointer transition-colors"
+                                  title="Remove special date rate"
+                                >
+                                  ✕
+                                </button>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <strong className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
-                                ₱{Number(rt).toLocaleString()}
-                              </strong>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDateRates((prev) => {
-                                    const copy = { ...prev };
-                                    if (copy[selectedInventoryRoom.id]) {
-                                      delete copy[selectedInventoryRoom.id][dt];
-                                    }
-                                    return copy;
-                                  });
-                                }}
-                                className="text-rose-600 hover:text-rose-800 hover:bg-rose-50 p-1 rounded-lg font-bold text-xs cursor-pointer transition-colors"
-                                title="Remove special date rate"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (

@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { Storage } from './server/storage';
 
@@ -14,7 +15,88 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json({ limit: '20mb' }));
+  // Permanent uploads directory
+  const UPLOADS_DIR = path.resolve(__dirname, 'public', 'uploads');
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+  // Statically serve uploaded images permanently
+  app.use('/uploads', express.static(UPLOADS_DIR));
+
+  // ==========================================
+  // PERMANENT IMAGE UPLOAD REST API
+  // ==========================================
+  app.post('/api/upload', (req, res) => {
+    try {
+      const { image, images, folder } = req.body;
+
+      const items: string[] = [];
+      if (Array.isArray(images) && images.length > 0) {
+        images.forEach((img: any) => {
+          if (typeof img === 'string') items.push(img);
+          else if (img && typeof img.data === 'string') items.push(img.data);
+        });
+      } else if (typeof image === 'string') {
+        items.push(image);
+      }
+
+      if (items.length === 0) {
+        return res.status(400).json({ success: false, error: 'No image data provided.' });
+      }
+
+      const savedUrls: string[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const base64Str = items[i];
+        if (!base64Str) continue;
+
+        // If it's already an existing URL path, retain it
+        if (base64Str.startsWith('/uploads/') || base64Str.startsWith('http://') || base64Str.startsWith('https://')) {
+          savedUrls.push(base64Str);
+          continue;
+        }
+
+        // Determine extension and buffer
+        const matches = base64Str.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        let ext = 'jpg';
+        let buffer: Buffer;
+
+        if (matches && matches.length === 3) {
+          const mimeType = matches[1].toLowerCase();
+          if (mimeType.includes('png')) ext = 'png';
+          else if (mimeType.includes('webp')) ext = 'webp';
+          else if (mimeType.includes('gif')) ext = 'gif';
+          else if (mimeType.includes('svg')) ext = 'svg';
+          buffer = Buffer.from(matches[2], 'base64');
+        } else {
+          const raw = base64Str.replace(/^data:[^;]+;base64,/, '');
+          buffer = Buffer.from(raw, 'base64');
+        }
+
+        const timestamp = Date.now();
+        const rand = Math.floor(1000 + Math.random() * 9000);
+        const prefix = folder ? `${folder}_` : 'img_';
+        const fileName = `${prefix}${timestamp}_${i + 1}_${rand}.${ext}`;
+        const filePath = path.join(UPLOADS_DIR, fileName);
+
+        fs.writeFileSync(filePath, buffer);
+        savedUrls.push(`/uploads/${fileName}`);
+      }
+
+      res.json({
+        success: true,
+        url: savedUrls[0] || '',
+        urls: savedUrls,
+      });
+    } catch (err: any) {
+      console.error('Error handling permanent image upload:', err);
+      res.status(500).json({ success: false, error: 'Failed to upload and store image permanently.' });
+    }
+  });
 
   // ==========================================
   // BOOKINGS REST API ENDPOINTS

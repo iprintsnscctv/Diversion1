@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { VillaLogo } from './VillaLogo';
 
+const FALLBACK_ROOM_IMAGE = 'https://images.unsplash.com/photo-1578683010236-d716f9a3f461?auto=format&fit=crop&w=1000&q=80';
+
 interface ExploreRoomsTabProps {
   rooms: RoomUnit[];
   onSelectRoomForBooking: (roomId: string, preferredStayType?: StayType) => void;
@@ -64,6 +66,7 @@ export const ExploreRoomsTab: React.FC<ExploreRoomsTabProps> = ({
 
   const handleNextImage = (roomId: string, imagesCount: number, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (imagesCount <= 1) return;
     setActiveImageIndexes((prev) => ({
       ...prev,
       [roomId]: ((prev[roomId] || 0) + 1) % imagesCount,
@@ -187,8 +190,9 @@ export const ExploreRoomsTab: React.FC<ExploreRoomsTabProps> = ({
       {/* Room Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-7">
         {filteredRooms.map((room) => {
-          const activeImgIdx = activeImageIndexes[room.id] || 0;
-          const currentImg = room.images[activeImgIdx] || room.images[0];
+          const roomImages = Array.isArray(room.images) && room.images.length > 0 ? room.images : [FALLBACK_ROOM_IMAGE];
+          const activeImgIdx = (activeImageIndexes[room.id] || 0) % roomImages.length;
+          const currentImg = roomImages[activeImgIdx] || roomImages[0] || FALLBACK_ROOM_IMAGE;
 
           return (
             <div
@@ -196,12 +200,28 @@ export const ExploreRoomsTab: React.FC<ExploreRoomsTabProps> = ({
               className="group bg-white rounded-3xl border border-[#E6D7C3] overflow-hidden shadow-lg hover:shadow-2xl hover:border-[#D4AF37] transition-all duration-300 flex flex-col justify-between"
             >
               {/* Image Section */}
-              <div className="relative aspect-4/3 overflow-hidden bg-stone-200">
+              <div 
+                onClick={(e) => {
+                  if (roomImages.length > 1) {
+                    handleNextImage(room.id, roomImages.length, e);
+                  }
+                }}
+                className={`relative aspect-[4/3] overflow-hidden bg-stone-200 ${
+                  roomImages.length > 1 ? 'cursor-pointer' : ''
+                }`}
+                title={roomImages.length > 1 ? 'Click to cycle room photos' : undefined}
+              >
                 <img
                   src={currentImg}
                   alt={room.title}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (target.src !== FALLBACK_ROOM_IMAGE) {
+                      target.src = FALLBACK_ROOM_IMAGE;
+                    }
+                  }}
                 />
 
                 {/* Room Number Badge (Top-Left) with Gold Frame */}
@@ -217,12 +237,12 @@ export const ExploreRoomsTab: React.FC<ExploreRoomsTabProps> = ({
                 </div>
 
                 {/* Multi-image thumbnail stepper */}
-                {room.images.length > 1 && (
+                {roomImages.length > 1 && (
                   <button
-                    onClick={(e) => handleNextImage(room.id, room.images.length, e)}
+                    onClick={(e) => handleNextImage(room.id, roomImages.length, e)}
                     className="absolute bottom-3 right-3 bg-white/90 hover:bg-white text-[#2C1E15] px-2.5 py-1 rounded-xl text-[11px] font-bold backdrop-blur-sm shadow-md transition-colors cursor-pointer border border-[#E6D7C3]"
                   >
-                    Photo {activeImgIdx + 1}/{room.images.length} ↻
+                    Photo {activeImgIdx + 1}/{roomImages.length} ↻
                   </button>
                 )}
 
@@ -346,13 +366,19 @@ export const ExploreRoomsTab: React.FC<ExploreRoomsTabProps> = ({
             </div>
 
             {/* Image Gallery */}
-            <div className={`grid gap-2 rounded-2xl overflow-hidden border border-[#E6D7C3] ${inspectRoom.images.length === 1 ? 'grid-cols-1' : inspectRoom.images.length === 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2'}`}>
-              {inspectRoom.images.map((img, i) => (
+            <div className={`grid gap-2 rounded-2xl overflow-hidden border border-[#E6D7C3] ${(inspectRoom.images?.length || 1) === 1 ? 'grid-cols-1' : inspectRoom.images?.length === 3 ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-2'}`}>
+              {(Array.isArray(inspectRoom.images) && inspectRoom.images.length > 0 ? inspectRoom.images : [FALLBACK_ROOM_IMAGE]).map((img, i) => (
                 <img
                   key={i}
                   src={img}
                   alt={`${inspectRoom.title} photo ${i + 1}`}
-                  className={`w-full object-cover hover:scale-105 transition-transform ${inspectRoom.images.length === 3 && i === 0 ? 'sm:col-span-3 h-52' : inspectRoom.images.length === 3 ? 'h-32' : 'h-40'}`}
+                  onError={(e) => {
+                    const target = e.currentTarget;
+                    if (target.src !== FALLBACK_ROOM_IMAGE) {
+                      target.src = FALLBACK_ROOM_IMAGE;
+                    }
+                  }}
+                  className={`w-full object-cover hover:scale-105 transition-transform ${(inspectRoom.images?.length === 3 && i === 0) ? 'sm:col-span-3 h-52' : inspectRoom.images?.length === 3 ? 'h-32' : 'h-40'}`}
                 />
               ))}
             </div>
