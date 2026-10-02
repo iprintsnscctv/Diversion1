@@ -12,6 +12,11 @@ COPY . .
 # Build frontend production assets
 RUN npm run build
 
+# Change ownership to node user
+RUN chown -R node:node /app
+
+USER node
+
 EXPOSE 3000
 
 ENV PORT=3000
