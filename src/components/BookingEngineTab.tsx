@@ -30,7 +30,6 @@ import {
   Receipt,
   DollarSign,
   ArrowLeft,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Info,
@@ -116,34 +115,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
   const [selectedRoomNumberFilter, setSelectedRoomNumberFilter] = useState<string>(
     preselectedRoomId || ''
   );
-  const [selectedPaxRateFilter, setSelectedPaxRateFilter] = useState<string>('all');
-
-  // Available pax rate options for dropdown
-  const availablePaxRateOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    rooms.forEach((r) => {
-      r.paxRates?.forEach((pr) => {
-        if (pr.paxLabel) {
-          map.set(pr.paxLabel, pr.paxLabel);
-        }
-      });
-    });
-    return Array.from(map.keys());
-  }, [rooms]);
-
-  // Filtered rooms based on Room Number and Pax Rate dropdowns
-  const filteredDisplayRooms = useMemo(() => {
-    return rooms.filter((room) => {
-      const matchRoom =
-        !selectedRoomNumberFilter ||
-        selectedRoomNumberFilter === 'all' ||
-        room.id === selectedRoomNumberFilter;
-      const matchPax =
-        selectedPaxRateFilter === 'all' ||
-        (room.paxRates && room.paxRates.some((pr) => pr.paxLabel.toLowerCase() === selectedPaxRateFilter.toLowerCase()));
-      return matchRoom && matchPax;
-    });
-  }, [rooms, selectedRoomNumberFilter, selectedPaxRateFilter]);
 
   // Step 2: Stay Type & Schedule
   const [stayType, setStayType] = useState<StayType>(
@@ -1664,61 +1635,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
 
               {/* Room Selection Dropdown */}
               <div className="space-y-4">
-                                <div className="flex flex-col md:flex-row gap-4 mb-6">
-                  <div className="flex-1">
-                    <label className="block text-[10px] font-bold text-[#786150] uppercase tracking-wider mb-1.5 ml-1 flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
-                      Filter by Room Number
-                    </label>
-                    <div className="relative group">
-                      <select
-                        value={selectedRoomNumberFilter}
-                        onChange={(e) => setSelectedRoomNumberFilter(e.target.value)}
-                        className="w-full pl-3 pr-10 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-sm text-[#2C1E15] font-bold outline-none focus:ring-2 focus:ring-[#2C1E15] appearance-none cursor-pointer hover:border-amber-400/50 transition-all shadow-sm"
-                      >
-                        <option value="all">All Room Numbers</option>
-                        {rooms.map((r) => {
-                          const bInfo = getRoomBookingInfo(r);
-                          const isBooked = bInfo.isBookedForSelectedDates || bInfo.hasAnyBooking;
-                          return (
-                            <option 
-                              key={r.id} 
-                              value={r.id} 
-                              disabled={isBooked}
-                              className={isBooked ? 'text-red-500 italic bg-red-50' : 'text-[#2C1E15] font-bold'}
-                            >
-                              {r.roomNumber || r.title} ({r.category}){isBooked ? ' — [BOOKED]' : ''}
-                            </option>
-                          );
-                        })}
-                      </select>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#786150] pointer-events-none transition-transform group-hover:text-[#2C1E15]" />
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <label className="block text-[10px] font-bold text-[#786150] uppercase tracking-wider mb-1.5 ml-1 flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
-                      Filter by Pax Rate
-                    </label>
-                    <div className="relative group">
-                      <select
-                        value={selectedPaxRateFilter}
-                        onChange={(e) => setSelectedPaxRateFilter(e.target.value)}
-                        className="w-full pl-3 pr-10 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FAF7F2] text-sm text-[#2C1E15] font-bold outline-none focus:ring-2 focus:ring-[#2C1E15] appearance-none cursor-pointer hover:border-amber-400/50 transition-all shadow-sm"
-                      >
-                        <option value="all">All Pax Rates</option>
-                        {availablePaxRateOptions.map((opt) => (
-                          <option key={opt} value={opt} className="text-[#2C1E15] font-bold">
-                            {opt}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#786150] pointer-events-none transition-transform group-hover:text-[#2C1E15]" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border-t border-[#E6D7C3]/40 pt-4">
+                <div>
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
                     <div>
                       <label className="block text-xs font-bold text-[#2C1E15] uppercase tracking-wider">
@@ -1740,7 +1657,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                         }}
                         className="text-[11px] font-bold text-amber-900 bg-amber-100/70 hover:bg-amber-200/80 px-2.5 py-1 rounded-lg border border-amber-300/60 transition-colors cursor-pointer"
                       >
-                        Select All Available ({filteredDisplayRooms.filter((r) => {
+                        Select All Available ({rooms.filter((r) => {
                           const bInfo = getRoomBookingInfo(r);
                           return !bInfo.isBookedForSelectedDates && !bInfo.hasAnyBooking;
                         }).length})
@@ -1767,8 +1684,8 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                   </div>
 
                   {/* Multiple Choice Interactive Room Number Grid View */}
-                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-2 lg:grid-cols-2 gap-2 mb-3 max-h-80 overflow-y-auto p-2 bg-[#FAF7F2] rounded-2xl border border-[#E6D7C3]/80">
-                    {filteredDisplayRooms.map((room) => {
+                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-2 lg:grid-cols-2 gap-2 mb-3 p-2 bg-[#FAF7F2] rounded-2xl border border-[#E6D7C3]/80">
+                    {rooms.map((room) => {
                       const isSelected = selectedRoomIds.includes(room.id);
                       const bookingInfo = getRoomBookingInfo(room);
                       const isBookedForDates = bookingInfo.isBookedForSelectedDates;
@@ -1798,9 +1715,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                         if (isSelected) {
                           const remainingIds = selectedRoomIds.filter((id) => id !== room.id);
                           setSelectedRoomIds(remainingIds);
-                          if (selectedRoomNumberFilter === room.id) {
-                            setSelectedRoomNumberFilter('');
-                          }
                           if (roomExtraPaxMap[room.id]) {
                             setRoomExtraPaxMap((prev) => {
                               const updated = { ...prev };
@@ -1817,7 +1731,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                           }
                         } else {
                           setSelectedRoomIds([...selectedRoomIds, room.id]);
-                          setSelectedRoomNumberFilter(room.id);
                         }
                       };
 
@@ -2091,9 +2004,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                 onClick={() => {
                                   const remainingIds = selectedRoomIds.filter((id) => id !== r.id);
                                   setSelectedRoomIds(remainingIds);
-                                  if (selectedRoomNumberFilter === r.id) {
-                                    setSelectedRoomNumberFilter('');
-                                  }
                                   if (roomExtraPaxMap[r.id]) {
                                     setRoomExtraPaxMap((prev) => {
                                       const updated = { ...prev };
