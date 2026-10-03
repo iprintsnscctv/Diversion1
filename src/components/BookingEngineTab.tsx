@@ -12,8 +12,6 @@ import {
   Eye,
   EyeOff,
   KeyRound,
-  Calendar as CalendarIcon, 
-  Clock, 
   Users, 
   Plus, 
   Minus, 
@@ -30,8 +28,6 @@ import {
   Receipt,
   DollarSign,
   ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
   Info,
   Waves,
   Sparkles,
@@ -136,8 +132,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
   const [hourlyStartTime, setHourlyStartTime] = useState<string>('14:00');
   const [hourlyDuration, setHourlyDuration] = useState<3 | 6 | 12>(3);
 
-  // Availability Calendar state: Current viewing month
-  const [calendarViewDate, setCalendarViewDate] = useState<Date>(() => new Date());
   const [calendarNotice, setCalendarNotice] = useState<string>('');
 
   // Guest Count with Age-Based Additional Pax Breakdown
@@ -986,142 +980,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
     }
   };
 
-  // Calendar Day Status Logic
-  const getDateClassification = (dateStr: string) => {
-    // 1. Past dates
-    if (dateStr < todayStr) {
-      return {
-        type: 'past',
-        bg: 'bg-gray-200 text-gray-400 cursor-not-allowed line-through',
-        badge: 'Past',
-      };
-    }
 
-    // 2. Currently Selected Date(s) -> Green
-    if (stayType === 'nightly') {
-      if (dateStr === checkInDate || dateStr === checkOutDate) {
-        return {
-          type: 'selected',
-          bg: 'bg-emerald-600 text-white font-black ring-2 ring-emerald-300 shadow-md',
-          badge: dateStr === checkInDate ? 'Check-in' : 'Check-out',
-        };
-      }
-      if (checkInDate && checkOutDate && dateStr > checkInDate && dateStr < checkOutDate) {
-        return {
-          type: 'selected_range',
-          bg: 'bg-emerald-500 text-white font-bold ring-1 ring-emerald-300',
-          badge: 'Stay',
-        };
-      }
-    } else {
-      if (dateStr === hourlyDate) {
-        return {
-          type: 'selected',
-          bg: 'bg-emerald-600 text-white font-black ring-2 ring-emerald-300 shadow-md',
-          badge: 'Selected',
-        };
-      }
-    }
-
-    // 3. Booked Date -> Yellow (Booked)
-    if (bookedDatesSet.has(dateStr)) {
-      return {
-        type: 'booked',
-        bg: 'bg-yellow-400 text-yellow-950 font-bold shadow-xs cursor-pointer border border-yellow-500/30',
-        badge: '', // Hide 'Booked' text/remark
-      };
-    }
-
-    // 4. Otherwise -> Orange (Available)
-    return {
-      type: 'available',
-      bg: 'bg-orange-500 text-white font-bold hover:bg-orange-600 shadow-xs cursor-pointer',
-      badge: 'Available',
-    };
-  };
-
-  // Calendar Date Click Handler
-  const handleCalendarDateClick = (dateStr: string) => {
-    if (dateStr < todayStr) return;
-
-    if (bookedDatesSet.has(dateStr)) {
-      const roomNames =
-        selectedRooms.length > 0
-          ? selectedRooms.map((r) => r.roomNumber || r.title).join(', ')
-          : selectedRoom
-          ? selectedRoom.roomNumber || selectedRoom.title
-          : 'the selected room';
-      setCalendarNotice("Few rooms available, please select another room");
-      setTimeout(() => setCalendarNotice(''), 4500);
-      return;
-    }
-
-    setCalendarNotice('');
-
-    if (stayType === 'nightly') {
-      if (checkInDate && checkOutDate) {
-        // Start fresh range
-        setCheckInDate(dateStr);
-        const nextDay = new Date(dateStr);
-        nextDay.setDate(nextDay.getDate() + 1);
-        setCheckOutDate(nextDay.toISOString().split('T')[0]);
-      } else if (checkInDate && !checkOutDate) {
-        if (dateStr > checkInDate) {
-          setCheckOutDate(dateStr);
-        } else {
-          setCheckInDate(dateStr);
-          const nextDay = new Date(dateStr);
-          nextDay.setDate(nextDay.getDate() + 1);
-          setCheckOutDate(nextDay.toISOString().split('T')[0]);
-        }
-      } else {
-        setCheckInDate(dateStr);
-        const nextDay = new Date(dateStr);
-        nextDay.setDate(nextDay.getDate() + 1);
-        setCheckOutDate(nextDay.toISOString().split('T')[0]);
-      }
-    } else {
-      setHourlyDate(dateStr);
-    }
-  };
-
-  // Calendar Month Navigation
-  const handlePrevMonth = () => {
-    setCalendarViewDate((prev) => {
-      const d = new Date(prev);
-      d.setMonth(d.getMonth() - 1);
-      return d;
-    });
-  };
-
-  const handleNextMonth = () => {
-    setCalendarViewDate((prev) => {
-      const d = new Date(prev);
-      d.setMonth(d.getMonth() + 1);
-      return d;
-    });
-  };
-
-  // Generate calendar days for current month view
-  const calendarDays = useMemo(() => {
-    const year = calendarViewDate.getFullYear();
-    const month = calendarViewDate.getMonth();
-    const firstDayIndex = new Date(year, month, 1).getDay(); // 0 is Sunday
-    const totalDays = new Date(year, month + 1, 0).getDate();
-
-    const padding = Array.from({ length: firstDayIndex }, (_, i) => null);
-    const days = Array.from({ length: totalDays }, (_, i) => {
-      const dayNum = i + 1;
-      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-      return { dayNum, dateStr };
-    });
-
-    return { padding, days, year, month };
-  }, [calendarViewDate]);
-
-  const monthLabel = useMemo(() => {
-    return calendarViewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  }, [calendarViewDate]);
 
   // Handle Form Submission
   const handleSubmitBooking = async (e: React.FormEvent) => {
@@ -1313,35 +1172,9 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                     1
                   </span>
                   <div>
-                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Stay Type & Availability Calendar</h3>
-                    <p className="text-xs text-[#786150]">Check live room availability calendar and choose your dates</p>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Stay Schedule</h3>
+                    <p className="text-xs text-[#786150]">Select your stay dates below</p>
                   </div>
-                </div>
-
-                {/* Stay Type Toggle: Nightly vs Hourly */}
-                <div className="flex items-center gap-1.5 bg-[#FAF7F2] p-1 rounded-2xl border border-[#E6D7C3] self-start sm:self-auto">
-                  <button
-                    type="button"
-                    onClick={() => setStayType('nightly')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                      stayType === 'nightly'
-                        ? 'bg-[#2C1E15] text-white shadow-xs'
-                        : 'text-[#523A2A] hover:bg-white'
-                    }`}
-                  >
-                    <span>🌙 Nightly Stay</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStayType('hourly')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                      stayType === 'hourly'
-                        ? 'bg-[#2C1E15] text-white shadow-xs'
-                        : 'text-[#523A2A] hover:bg-white'
-                    }`}
-                  >
-                    <span>⏱️ Short Stay (3h / 6h)</span>
-                  </button>
                 </div>
               </div>
 
@@ -1409,124 +1242,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                 </div>
               </div>
 
-              {/* Availability Calendar Section with requested color coding */}
-              <div className="p-4 sm:p-5 rounded-2xl bg-[#FDFBF7] border-2 border-[#E6D7C3] space-y-4">
-                
-                {/* Calendar Header with Legend & Month Controls */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E6D7C3]/50 pb-3">
-                  <div>
-                    <h4 className="font-serif font-bold text-base text-[#2C1E15] flex items-center gap-2">
-                      <CalendarIcon className="w-4 h-4 text-[#2C1E15]" />
-                      <span>
-                        Availability Calendar —{' '}
-                        {selectedRooms.length === 1
-                          ? (selectedRoom ? (selectedRoom.roomNumber || selectedRoom.title) : 'All Units')
-                          : selectedRooms.length > 1
-                          ? `${selectedRooms.length} Units Selected (${selectedRooms.map((r) => r.roomNumber || r.title.split('–')[0].trim()).join(', ')})`
-                          : 'All Units'}
-                      </span>
-                    </h4>
-                    <p className="text-xs text-[#786150]">
-                      {selectedRooms.length > 0
-                        ? `Dates in yellow are already booked for ${selectedRooms.map((r) => r.roomNumber || r.title.split('–')[0].trim()).join(', ')}. Click an orange (available) date below.`
-                        : 'Dates in yellow are already booked across units. Click an orange (available) date below to set your stay schedule.'}
-                    </p>
-                  </div>
 
-                  {/* Month Navigation */}
-                  <div className="flex items-center gap-2 self-start sm:self-center">
-                    <button
-                      type="button"
-                      onClick={handlePrevMonth}
-                      className="p-1.5 rounded-lg border border-[#E6D7C3] bg-white hover:bg-[#F5EBE6] text-[#2C1E15] transition-colors cursor-pointer"
-                      title="Previous Month"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <span className="font-bold text-xs text-[#2C1E15] px-2 min-w-28 text-center">
-                      {monthLabel}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleNextMonth}
-                      className="p-1.5 rounded-lg border border-[#E6D7C3] bg-white hover:bg-[#F5EBE6] text-[#2C1E15] transition-colors cursor-pointer"
-                      title="Next Month"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Color Legend (Red: Booked, Orange: Available, Green: Selected Date) */}
-                <div className="bg-white p-3 rounded-xl border border-[#E6D7C3]/70 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <span className="font-bold text-[#2C1E15] uppercase text-[11px] tracking-wider">
-                    Calendar Legend:
-                  </span>
-                  <div className="flex flex-wrap items-center gap-3 sm:gap-5">
-                    {/* Orange Available */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3.5 h-3.5 rounded-md bg-orange-500 shadow-xs"></span>
-                      <span className="font-bold text-orange-950">Orange: Available</span>
-                    </div>
-                    {/* Green Selected Date */}
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3.5 h-3.5 rounded-md bg-emerald-600 ring-2 ring-emerald-300 shadow-xs"></span>
-                      <span className="font-bold text-emerald-950">Green: Selected Date</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Notice message if user clicks booked date */}
-                {calendarNotice && (
-                  <div className="p-2.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
-                    <span>{calendarNotice}</span>
-                  </div>
-                )}
-
-                {/* Calendar Grid */}
-                <div className="bg-white p-3 sm:p-4 rounded-xl border border-[#E6D7C3]">
-                  {/* Days of week */}
-                  <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-bold text-[#786150] pb-2 border-b border-[#E6D7C3]/40 mb-2">
-                    <span>Sun</span>
-                    <span>Mon</span>
-                    <span>Tue</span>
-                    <span>Wed</span>
-                    <span>Thu</span>
-                    <span>Fri</span>
-                    <span>Sat</span>
-                  </div>
-
-                  {/* Day cells */}
-                  <div className="grid grid-cols-7 gap-1.5">
-                    {/* Padding empty slots */}
-                    {calendarDays.padding.map((_, idx) => (
-                      <div key={`pad-${idx}`} className="h-10 sm:h-12 rounded-lg bg-gray-50/50"></div>
-                    ))}
-
-                    {/* Month Days */}
-                    {calendarDays.days.map(({ dayNum, dateStr }) => {
-                      const status = getDateClassification(dateStr);
-                      return (
-                        <button
-                          key={dateStr}
-                          type="button"
-                          onClick={() => handleCalendarDateClick(dateStr)}
-                          disabled={status.type === 'past'}
-                          className={`h-10 sm:h-12 rounded-xl text-xs flex flex-col items-center justify-center transition-all cursor-pointer relative ${status.bg}`}
-                          title={`${dateStr}: ${status.badge}`}
-                        >
-                          <span className="text-xs sm:text-sm leading-tight">{dayNum}</span>
-                          <span className="text-[9px] uppercase tracking-tighter opacity-90 hidden sm:block">
-                            {status.badge}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-              </div>
 
               {/* Nightly Schedule Inputs */}
               {stayType === 'nightly' ? (
@@ -1636,7 +1352,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
               {/* Room Selection Dropdown */}
               <div className="space-y-4">
                 <div>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+                  <div className="mb-2.5">
                     <div>
                       <label className="block text-xs font-bold text-[#2C1E15] uppercase tracking-wider">
                         Accommodation Unit (All Rooms) — Multiple Choices Allowed
@@ -1644,42 +1360,6 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                       <p className="text-[11px] text-[#786150]">
                         Choose your pax and click the room number to see the actual rate • <span className="text-red-700 font-bold inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-600 inline-block"></span> Highlighted in red = Already Booked</span>
                       </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const availableRooms = rooms.filter((r) => {
-                            const bInfo = getRoomBookingInfo(r);
-                            return !bInfo.isBookedForSelectedDates && !bInfo.hasAnyBooking;
-                          });
-                          setSelectedRoomIds(availableRooms.map((r) => r.id));
-                        }}
-                        className="text-[11px] font-bold text-amber-900 bg-amber-100/70 hover:bg-amber-200/80 px-2.5 py-1 rounded-lg border border-amber-300/60 transition-colors cursor-pointer"
-                      >
-                        Select All Available ({rooms.filter((r) => {
-                          const bInfo = getRoomBookingInfo(r);
-                          return !bInfo.isBookedForSelectedDates && !bInfo.hasAnyBooking;
-                        }).length})
-                      </button>
-                      {selectedRoomIds.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedRoomIds([]);
-                            setSelectedRoomNumberFilter('');
-                            setRoomExtraPaxMap({});
-                            setRoomPaxQuantityMap({});
-                            setRoomChildPaxMap({});
-                            setAddonQuantities((prev) => ({
-                              ...prev,
-                            }));
-                          }}
-                          className="text-[11px] font-bold text-[#786150] hover:text-[#2C1E15] bg-stone-100 hover:bg-stone-200 px-2.5 py-1 rounded-lg border border-stone-300/60 transition-colors cursor-pointer"
-                        >
-                          Clear Selection
-                        </button>
-                      )}
                     </div>
                   </div>
 
