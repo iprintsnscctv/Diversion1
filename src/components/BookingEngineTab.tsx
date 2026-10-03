@@ -2102,39 +2102,24 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                   )}
                 </div>
 
-                {/* Active Mobile Number & Email Address */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-[#2C1E15] mb-1">
-                      Active mobile number <span className="text-rose-600 font-bold">*</span>
-                    </label>
-                    <input
-                      type="tel"
-                      required
-                      placeholder="e.g. 0917 123 4567"
-                      value={guestPhone}
-                      onChange={(e) => setGuestPhone(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
-                    />
-                    {formErrors.guestPhone && (
-                      <span className="text-xs text-rose-600 font-medium block mt-1">
-                        {formErrors.guestPhone}
-                      </span>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-[#2C1E15] mb-1">
-                      Email Address
-                    </label>
-                    <input
-                      type="email"
-                      placeholder="e.g. juandelacruz@gmail.com"
-                      value={guestEmail}
-                      onChange={(e) => setGuestEmail(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
-                    />
-                  </div>
+                {/* Active Mobile Number */}
+                <div>
+                  <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                    Active mobile number <span className="text-rose-600 font-bold">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="e.g. 0917 123 4567"
+                    value={guestPhone}
+                    onChange={(e) => setGuestPhone(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
+                  />
+                  {formErrors.guestPhone && (
+                    <span className="text-xs text-rose-600 font-medium block mt-1">
+                      {formErrors.guestPhone}
+                    </span>
+                  )}
                 </div>
 
                 {/* My Booking Registration */}
