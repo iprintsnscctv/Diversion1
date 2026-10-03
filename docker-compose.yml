@@ -2,9 +2,7 @@ version: "3.8"
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # image: your-registry/vigan-booking-app:latest
     image: vigan-booking-app:latest
     container_name: vigan_booking_app
     restart: always

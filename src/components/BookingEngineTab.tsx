@@ -1178,69 +1178,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                 </div>
               </div>
 
-              {/* Synced Accommodation Unit Selector Bar */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#FAF7F2] p-3 sm:p-3.5 rounded-2xl border border-[#E6D7C3]">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Building2 className="w-4 h-4 text-[#B8860B] shrink-0" />
-                  <span className="text-xs font-bold text-[#2C1E15] uppercase tracking-wider shrink-0">
-                    Synced Unit:
-                  </span>
-                  <span className="text-xs font-bold text-[#8B6B10] truncate">
-                    {selectedRooms.length === 1
-                      ? `${selectedRooms[0].roomNumber || selectedRooms[0].title} (${selectedRooms[0].category})`
-                      : selectedRooms.length > 1
-                      ? `${selectedRooms.length} Units Selected: ${selectedRooms.map((r) => r.roomNumber || r.title.split('–')[0].trim()).join(', ')}`
-                      : 'All Accommodation Units'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <label className="text-[11px] font-bold text-[#786150]">Switch Unit:</label>
-                  <select
-                    value={selectedRooms.length === 1 ? selectedRooms[0].id : selectedRooms.length > 1 ? 'multi' : 'all'}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === 'all') {
-                        setSelectedRoomIds([]);
-                        setSelectedRoomNumberFilter('');
-                      } else if (val !== 'multi') {
-                        const targetRoom = rooms.find((r) => r.id === val);
-                        if (targetRoom) {
-                          const bInfo = getRoomBookingInfo(targetRoom);
-                          if (bInfo.isBookedForSelectedDates || bInfo.hasAnyBooking) {
-                            setCalendarNotice(`Unavailable: ${targetRoom.roomNumber || targetRoom.title} is already booked or reserved and cannot be chosen.`);
-                            setTimeout(() => setCalendarNotice(''), 5000);
-                            return;
-                          }
-                        }
-                        setSelectedRoomIds([val]);
-                        setSelectedRoomNumberFilter(val);
-                      }
-                    }}
-                    className="px-2.5 py-1.5 rounded-xl border border-[#E6D7C3] bg-white text-xs font-bold text-[#2C1E15] outline-none cursor-pointer focus:ring-2 focus:ring-[#B8860B]"
-                  >
-                    <option value="all">All Accommodation Units</option>
-                    {selectedRooms.length > 1 && (
-                      <option value="multi" disabled>
-                        {selectedRooms.length} Units Selected
-                      </option>
-                    )}
-                    {rooms.map((r) => {
-                      const bInfo = getRoomBookingInfo(r);
-                      const isUnavailable = bInfo.isBookedForSelectedDates || bInfo.hasAnyBooking;
-                      return (
-                        <option
-                          key={r.id}
-                          value={r.id}
-                          disabled={isUnavailable}
-                          className={isUnavailable ? 'text-red-500 font-normal bg-red-50' : 'text-[#2C1E15] font-bold'}
-                        >
-                          {r.roomNumber || r.title} ({r.category}){isUnavailable ? ' — [ALREADY BOOKED/RESERVED]' : ''}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-              </div>
+
 
 
 
@@ -1256,7 +1194,13 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                         type="date"
                         value={checkInDate}
                         min={todayStr}
-                        onChange={(e) => setCheckInDate(e.target.value)}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCheckInDate(val);
+                          const nextDay = new Date(val);
+                          nextDay.setDate(nextDay.getDate() + 1);
+                          setCheckOutDate(nextDay.toISOString().split('T')[0]);
+                        }}
                         className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium focus:ring-2 focus:ring-[#2C1E15] outline-none"
                       />
                     </div>
@@ -1581,40 +1525,49 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                 {/* Child Pax Selector with Child Rate beside it: Pax plus Child Pax up to Max Pax */}
                                 <div
                                   onClick={(e) => e.stopPropagation()}
-                                  className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border text-xs font-semibold transition-all ${
+                                  className={`flex flex-col gap-0.5 px-2 py-1 rounded-lg border text-xs font-semibold transition-all ${
                                     isSelected
                                       ? "bg-amber-950/70 border-amber-400/50 text-amber-100"
                                       : "bg-[#FAF7F2] border-[#E6D7C3] text-[#2C1E15]"
                                   }`}
-                                  title={`Select Child Pax (6-10 year old) for ${roomUnitName}. Total max pax is pax plus child pax up to ${maxAcc}.`}
+                                  title={`Select Children (6-10 years old) for ${roomUnitName}. Total max pax is adults plus children up to ${maxAcc}.`}
                                 >
-                                  <span className={`text-[10px] font-bold ${isSelected ? "text-amber-200" : "text-[#786150]"} uppercase`}>
-                                    Child - Pax:
-                                  </span>
-                                  <select
-                                    value={roomChildPaxMap[room.id] || 0}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
-                                      setRoomChildPaxMap((prev) => ({ ...prev, [room.id]: val }));
-                                      if (currentPaxQuantity + val > maxAcc) {
-                                        const adjustedPax = Math.max(1, maxAcc - val);
-                                        handleSetRoomPaxQuantity(room.id, adjustedPax);
-                                      }
-                                    }}
-                                    className={`rounded px-1.5 py-0.5 text-xs font-bold outline-none cursor-pointer border ${
-                                      isSelected
-                                        ? "bg-[#2C1E15] text-amber-200 border-amber-500/40"
-                                        : "bg-white text-[#2C1E15] border-[#E6D7C3]"
-                                    }`}
-                                  >
-                                    {Array.from({ length: Math.max(1, maxAcc) }, (_, i) => i).map((num) => (
-                                      <option key={num} value={num} className="bg-white text-[#2C1E15]">
-                                        {num} {num === 1 ? 'Child' : 'Children'}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  <span className={`text-[9.5px] ${isSelected ? "text-amber-300" : "text-[#786150]"} font-medium whitespace-nowrap ml-0.5 pl-1.5 border-l ${isSelected ? "border-amber-400/40" : "border-[#E6D7C3]"}`}>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`text-[10px] font-bold ${isSelected ? "text-amber-200" : "text-[#786150]"} uppercase`}>
+                                      Children:
+                                    </span>
+                                    <select
+                                      value={roomChildPaxMap[room.id] || 0}
+                                      onChange={(e) => {
+                                        const val = Number(e.target.value);
+                                        setRoomChildPaxMap((prev) => ({ ...prev, [room.id]: val }));
+                                        if (currentPaxQuantity + val > maxAcc) {
+                                          const adjustedPax = Math.max(1, maxAcc - val);
+                                          handleSetRoomPaxQuantity(room.id, adjustedPax);
+                                        }
+                                      }}
+                                      className={`rounded px-1.5 py-0.5 text-xs font-bold outline-none cursor-pointer border ${
+                                        isSelected
+                                          ? "bg-[#2C1E15] text-amber-200 border-amber-500/40"
+                                          : "bg-white text-[#2C1E15] border-[#E6D7C3]"
+                                      }`}
+                                    >
+                                      {Array.from({ length: Math.max(1, maxAcc) }, (_, i) => i).map((num) => (
+                                        <option key={num} value={num} className="bg-white text-[#2C1E15]">
+                                          {num} {num === 1 ? 'Child' : 'Children'}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <span className={`text-[9.5px] ${isSelected ? "text-amber-300" : "text-[#786150]"} font-medium whitespace-nowrap`}>
                                     6-10 years old
+                                    <span className={`ml-1 font-bold ${isSelected ? "text-amber-200" : "text-[#2C1E15]"}`}>
+                                      ({(() => {
+                                        const isW = nightlyBreakdown.length > 0 ? nightlyBreakdown[0].isWeekend : false;
+                                        const childRate = isW ? 250 : 200;
+                                        return `₱${childRate}`;
+                                      })()}/night)
+                                    </span>
                                   </span>
                                 </div>
 
