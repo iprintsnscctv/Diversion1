@@ -1440,6 +1440,9 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                   ? `Max ${maxAcc} Pax`
                                   : `Good for ${capText.replace(/^(good for|Good for)\s*/i, '')} (Max ${maxAcc} Pax)`}
                               </span>
+                              <span className={`text-[9.5px] block mt-0.5 italic font-bold ${isSelected ? "text-amber-200/90" : isEffectivelyBooked ? "text-red-700" : "text-[#8B6B10]"}`}>
+                                1-3 years old: FREE (w/out bed)
+                              </span>
                               {isEffectivelyBooked ? (
                                 <div className="flex items-center gap-1.5 mt-1 text-[10px] font-bold text-red-700 bg-red-100/90 px-2 py-0.5 rounded-md border border-red-300">
                                   <AlertCircle className="w-3 h-3 text-red-600 shrink-0" />
@@ -2257,7 +2260,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                     6
                   </span>
                   <div>
-                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Payment Mode & Details</h3>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">payment options</h3>
                     <p className="text-xs text-[#786150]">Send deposit to our verified merchant accounts</p>
                   </div>
                 </div>
