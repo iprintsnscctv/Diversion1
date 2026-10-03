@@ -115,6 +115,7 @@ export interface BookingRecord {
   // Guest Details
   guestName: string;
   guestPhone: string;
+  guestAddress?: string;
   guestEmail?: string;
   guestUsername?: string;
   guestPassword?: string;

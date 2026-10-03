@@ -160,6 +160,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
   // Step 4: Guest Contact Details & Registration
   const [guestName, setGuestName] = useState<string>('');
   const [guestPhone, setGuestPhone] = useState<string>('');
+  const [guestAddress, setGuestAddress] = useState<string>('');
   const [guestEmail, setGuestEmail] = useState<string>('');
   const [guestUsername, setGuestUsername] = useState<string>('');
   const [guestPassword, setGuestPassword] = useState<string>('');
@@ -991,6 +992,10 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
       errors.guestName = 'Please enter guest full name';
     }
 
+    if (!guestAddress.trim()) {
+      errors.guestAddress = 'Please enter guest address';
+    }
+
     if (!guestPhone.trim()) {
       errors.guestPhone = 'Compulsory: Active mobile phone number is required for SMS check-in details';
     } else if (guestPhone.trim().length < 7) {
@@ -1096,6 +1101,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
       paymentSlipFileName: slipFile?.name || 'payment_slip.jpg',
       guestName: guestName.trim(),
       guestPhone: guestPhone.trim(),
+      guestAddress: guestAddress.trim(),
       guestEmail: guestEmail.trim() || undefined,
       guestUsername: guestUsername.trim() || undefined,
       guestPassword: guestPassword.trim() || undefined,
@@ -2076,6 +2082,26 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                   )}
                 </div>
 
+                {/* Address */}
+                <div>
+                  <label className="block text-xs font-bold text-[#2C1E15] mb-1">
+                    Address <span className="text-rose-600 font-bold">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 123 Vigan St., Ilocos Sur"
+                    value={guestAddress}
+                    onChange={(e) => setGuestAddress(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-[#E6D7C3] bg-[#FDFBF7] text-sm text-[#2C1E15] font-medium outline-none focus:ring-2 focus:ring-[#2C1E15]"
+                  />
+                  {formErrors.guestAddress && (
+                    <span className="text-xs text-rose-600 font-medium block mt-1">
+                      {formErrors.guestAddress}
+                    </span>
+                  )}
+                </div>
+
                 {/* Active Mobile Number & Email Address */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -2544,7 +2570,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
             <div className="flex items-center justify-between border-b border-[#E6D7C3]/60 pb-3">
               <div className="flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-[#2C1E15]" />
-                <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Stay Summary</h3>
+                <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Booking Summary</h3>
               </div>
               <span className="text-xs bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded-full">
                 Live Calculator
@@ -2775,6 +2801,69 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                 <span className="font-semibold text-white">
                   ₱{remainingBalance.toLocaleString()}
                 </span>
+              </div>
+            </div>
+
+            {/* Booking Details Breakdown */}
+            <div className="p-4 rounded-2xl bg-[#FDFBF7] border border-[#E6D7C3] space-y-2 text-xs text-[#523A2A]">
+              <h4 className="font-bold text-[#2C1E15] border-b border-[#E6D7C3] pb-1 uppercase tracking-wider text-[10px]">
+                Booking details:
+              </h4>
+              <div className="space-y-1">
+                <div className="flex justify-between items-start">
+                  <span className="text-[#786150] shrink-0">Name:</span>
+                  <span className="font-bold text-[#2C1E15] text-right">{guestName || '—'}</span>
+                </div>
+                <div className="flex justify-between items-start">
+                  <span className="text-[#786150] shrink-0">Address:</span>
+                  <span className="font-bold text-[#2C1E15] text-right">{guestAddress || '—'}</span>
+                </div>
+                <div className="flex justify-between items-start">
+                  <span className="text-[#786150] shrink-0">Cp #:</span>
+                  <span className="font-bold text-[#2C1E15] text-right">{guestPhone || '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#786150]">Check in:</span>
+                  <span className="font-bold text-[#2C1E15]">{checkInDate}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#786150]">Check out:</span>
+                  <span className="font-bold text-[#2C1E15]">{checkOutDate}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#786150]">Check in time:</span>
+                  <span className="font-bold text-[#2C1E15]">2pm</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#786150]">Check out time:</span>
+                  <span className="font-bold text-[#2C1E15]">12noon</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#786150]">No of pax:</span>
+                  <span className="font-bold text-[#2C1E15]">{totalPax}</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-[#E6D7C3]/40">
+                  <span className="text-[#786150]">Partial:</span>
+                  <span className="font-bold text-emerald-700">₱{amountPayableNow.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#786150]">Balance:</span>
+                  <span className="font-bold text-[#2C1E15]">₱{remainingBalance.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#786150]">Room rate:</span>
+                  <span className="font-bold text-[#2C1E15]">₱{baseStayRate.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-start">
+                  <span className="text-[#786150] shrink-0">Room number:</span>
+                  <span className="font-bold text-[#2C1E15] text-right ml-4">
+                    {selectedRooms.length > 0 ? selectedRooms.map(r => r.roomNumber || r.title.split('–')[0].trim()).join(', ') : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#786150]">Number of room:</span>
+                  <span className="font-bold text-[#2C1E15]">{selectedRooms.length}</span>
+                </div>
               </div>
             </div>
 
