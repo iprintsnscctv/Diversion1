@@ -2260,7 +2260,7 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                     6
                   </span>
                   <div>
-                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">payment options</h3>
+                    <h3 className="font-serif font-bold text-lg text-[#2C1E15]">Payment Method</h3>
                     <p className="text-xs text-[#786150]">Send deposit to our verified merchant accounts</p>
                   </div>
                 </div>
