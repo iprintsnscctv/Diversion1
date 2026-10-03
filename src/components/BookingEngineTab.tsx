@@ -1569,6 +1569,9 @@ export const BookingEngineTab: React.FC<BookingEngineTabProps> = ({
                                       })()}/night)
                                     </span>
                                   </span>
+                                  <span className={`text-[9px] ${isSelected ? "text-amber-100/80" : "text-[#8B735B]"} italic font-semibold mt-0.5 pt-0.5 border-t ${isSelected ? "border-amber-400/20" : "border-[#E6D7C3]/40"}`}>
+                                    1-3 years old: FREE (w/out bed)
+                                  </span>
                                 </div>
 
                                 {/* Total Combined Pax Indicator: pax plus child pax until reach to max pax */}
